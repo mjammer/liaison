@@ -23,10 +23,20 @@ func (cp *controlPlane) RegisterFirewallManager(firewallManager proto.FirewallMa
 }
 
 func (cp *controlPlane) CreateProxy(_ context.Context, req *v1.CreateProxyRequest) (*v1.CreateProxyResponse, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, badRequest("PROXY_NAME_REQUIRED", "访问名称不能为空")
+	}
+	if req.ApplicationId == 0 {
+		return nil, badRequest("APPLICATION_ID_REQUIRED", "关联应用不能为空")
+	}
+	if req.Port < 0 || req.Port > 65535 {
+		return nil, badRequest("PROXY_PORT_INVALID", "公网端口必须在 1-65535 之间，或留空自动分配")
+	}
 	application, err := cp.repo.GetApplicationByID(uint(req.ApplicationId))
 	if err != nil {
 		log.Warnf("application %d not found", req.ApplicationId)
-		return nil, err
+		return nil, mapRecordNotFound(err, "APPLICATION_NOT_FOUND", "关联应用不存在")
 	}
 	edge, err := cp.validateProxyApplication(application)
 	if err != nil {
@@ -46,7 +56,7 @@ func (cp *controlPlane) CreateProxy(_ context.Context, req *v1.CreateProxyReques
 	}
 
 	proxy := &model.Proxy{
-		Name:          req.Name,
+		Name:          name,
 		Status:        model.ProxyStatusRunning,
 		Description:   req.Description,
 		Port:          requestedPort,
@@ -150,15 +160,25 @@ func (cp *controlPlane) ListProxies(_ context.Context, req *v1.ListProxiesReques
 }
 
 func (cp *controlPlane) UpdateProxy(_ context.Context, req *v1.UpdateProxyRequest) (*v1.UpdateProxyResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("PROXY_ID_REQUIRED", "访问 ID 不能为空")
+	}
+	if req.Port < 0 || req.Port > 65535 {
+		return nil, badRequest("PROXY_PORT_INVALID", "公网端口必须在 1-65535 之间")
+	}
 	proxy, err := cp.repo.GetProxyByID(uint(req.Id))
 	if err != nil {
-		return nil, err
+		return nil, mapRecordNotFound(err, "PROXY_NOT_FOUND", "访问不存在")
 	}
 
 	oldProxy := *proxy
 
 	if req.Name != "" {
-		proxy.Name = req.Name
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			return nil, badRequest("PROXY_NAME_REQUIRED", "访问名称不能为空")
+		}
+		proxy.Name = name
 	}
 	if req.Description != "" {
 		proxy.Description = req.Description
@@ -176,7 +196,7 @@ func (cp *controlPlane) UpdateProxy(_ context.Context, req *v1.UpdateProxyReques
 		case "stopped":
 			proxy.Status = model.ProxyStatusStopped
 		default:
-			return nil, fmt.Errorf("unknown proxy status: %s", req.Status)
+			return nil, badRequest("PROXY_STATUS_INVALID", "访问状态无效")
 		}
 	}
 
@@ -190,7 +210,7 @@ func (cp *controlPlane) UpdateProxy(_ context.Context, req *v1.UpdateProxyReques
 		application, applicationErr = cp.repo.GetApplicationByID(proxy.ApplicationID)
 	}
 	if proxy.Status == model.ProxyStatusRunning && applicationErr != nil {
-		return nil, applicationErr
+		return nil, mapRecordNotFound(applicationErr, "APPLICATION_NOT_FOUND", "关联应用不存在")
 	}
 
 	oldRuntimeEligible := false
@@ -253,6 +273,12 @@ func (cp *controlPlane) UpdateProxy(_ context.Context, req *v1.UpdateProxyReques
 }
 
 func (cp *controlPlane) DeleteProxy(_ context.Context, req *v1.DeleteProxyRequest) (*v1.DeleteProxyResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("PROXY_ID_REQUIRED", "访问 ID 不能为空")
+	}
+	if _, err := cp.repo.GetProxyByID(uint(req.Id)); err != nil {
+		return nil, mapRecordNotFound(err, "PROXY_NOT_FOUND", "访问不存在")
+	}
 	if err := cp.deleteProxyCascade(uint(req.Id), newLifecycleDeleteTracker()); err != nil {
 		return nil, err
 	}

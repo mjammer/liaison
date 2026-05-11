@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,11 +18,15 @@ import (
 )
 
 func (cp *controlPlane) CreateEdge(_ context.Context, req *v1.CreateEdgeRequest) (*v1.CreateEdgeResponse, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, badRequest("EDGE_NAME_REQUIRED", "连接器名称不能为空")
+	}
 	// 在事务中创建edge和ak/sk
 	tx := cp.repo.Begin()
 
 	edge := &model.Edge{
-		Name:        req.Name,
+		Name:        name,
 		Description: req.Description,
 		Status:      model.EdgeStatusRunning, // 默认状态为运行中
 		Online:      model.EdgeOnlineStatusOffline,
@@ -107,9 +110,12 @@ func (cp *controlPlane) CreateEdge(_ context.Context, req *v1.CreateEdgeRequest)
 }
 
 func (cp *controlPlane) GetEdge(_ context.Context, req *v1.GetEdgeRequest) (*v1.GetEdgeResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("EDGE_ID_REQUIRED", "连接器 ID 不能为空")
+	}
 	edge, err := cp.repo.GetEdge(req.Id)
 	if err != nil {
-		return nil, err
+		return nil, mapRecordNotFound(err, "EDGE_NOT_FOUND", "连接器不存在")
 	}
 	// 通过 EdgeDevice 关系表获取关联的 Device（Host 类型）
 	hostType := model.EdgeDeviceRelationHost
@@ -279,13 +285,20 @@ func (cp *controlPlane) ListEdges(_ context.Context, req *v1.ListEdgesRequest) (
 }
 
 func (cp *controlPlane) UpdateEdge(_ context.Context, req *v1.UpdateEdgeRequest) (*v1.UpdateEdgeResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("EDGE_ID_REQUIRED", "连接器 ID 不能为空")
+	}
 	edge, err := cp.repo.GetEdge(req.Id)
 	if err != nil {
-		return nil, err
+		return nil, mapRecordNotFound(err, "EDGE_NOT_FOUND", "连接器不存在")
 	}
 	oldStatus := edge.Status
 	if req.Name != "" {
-		edge.Name = req.Name
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			return nil, badRequest("EDGE_NAME_REQUIRED", "连接器名称不能为空")
+		}
+		edge.Name = name
 	}
 	if req.Description != "" {
 		edge.Description = req.Description
@@ -295,7 +308,7 @@ func (cp *controlPlane) UpdateEdge(_ context.Context, req *v1.UpdateEdgeRequest)
 		case model.EdgeStatusRunning, model.EdgeStatusStopped:
 			edge.Status = model.EdgeStatus(req.Status)
 		default:
-			return nil, fmt.Errorf("unknown edge status: %d", req.Status)
+			return nil, badRequest("EDGE_STATUS_INVALID", "连接器运行状态无效")
 		}
 	}
 	statusChanged := oldStatus != edge.Status
@@ -331,6 +344,12 @@ func (cp *controlPlane) UpdateEdge(_ context.Context, req *v1.UpdateEdgeRequest)
 }
 
 func (cp *controlPlane) DeleteEdge(_ context.Context, req *v1.DeleteEdgeRequest) (*v1.DeleteEdgeResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("EDGE_ID_REQUIRED", "连接器 ID 不能为空")
+	}
+	if _, err := cp.repo.GetEdge(req.Id); err != nil {
+		return nil, mapRecordNotFound(err, "EDGE_NOT_FOUND", "连接器不存在")
+	}
 	if err := cp.deleteEdgeCascade(req.Id, newLifecycleDeleteTracker()); err != nil {
 		return nil, err
 	}
@@ -341,19 +360,32 @@ func (cp *controlPlane) DeleteEdge(_ context.Context, req *v1.DeleteEdgeRequest)
 }
 
 func (cp *controlPlane) CreateEdgeScanApplicationTask(_ context.Context, req *v1.CreateEdgeScanApplicationTaskRequest) (*v1.CreateEdgeScanApplicationTaskResponse, error) {
+	if req.EdgeId == 0 {
+		return nil, badRequest("EDGE_ID_REQUIRED", "连接器 ID 不能为空")
+	}
+	if req.Port < 0 || req.Port > 65535 {
+		return nil, badRequest("SCAN_PORT_INVALID", "扫描端口必须在 1-65535 之间，或留空扫描常用端口")
+	}
+	req.Protocol = strings.ToLower(strings.TrimSpace(req.Protocol))
+	if req.Protocol == "" {
+		req.Protocol = "tcp"
+	}
+	if req.Protocol != "tcp" && req.Protocol != "udp" {
+		return nil, badRequest("SCAN_PROTOCOL_INVALID", "扫描协议仅支持 tcp 或 udp")
+	}
 	// 获取edge
 	edge, err := cp.repo.GetEdge(req.EdgeId)
 	if err != nil {
 		log.Errorf("get edge error: %s", err)
-		return nil, err
+		return nil, mapRecordNotFound(err, "EDGE_NOT_FOUND", "连接器不存在")
 	}
 	if edge.Status == model.EdgeStatusStopped {
 		log.Errorf("edge is stopped")
-		return nil, errors.New("edge is stopped")
+		return nil, preconditionFailed("EDGE_STOPPED", "连接器已禁用，无法扫描应用")
 	}
 	if edge.Online != model.EdgeOnlineStatusOnline {
 		log.Errorf("edge is not online")
-		return nil, errors.New("edge is not online")
+		return nil, preconditionFailed("EDGE_OFFLINE", "连接器离线，无法扫描应用")
 	}
 
 	// 获取设备（通过 EdgeDevice 关系表，Host 类型）
@@ -361,12 +393,12 @@ func (cp *controlPlane) CreateEdgeScanApplicationTask(_ context.Context, req *v1
 	edgeDevices, err := cp.repo.GetEdgeDevicesByEdgeID(req.EdgeId, &hostType)
 	if err != nil || len(edgeDevices) == 0 {
 		log.Errorf("get edge device relation error: %s", err)
-		return nil, errors.New("edge has no associated device")
+		return nil, conflict("EDGE_DEVICE_MISSING", "连接器未关联设备，无法扫描应用")
 	}
 	device, err := cp.repo.GetDeviceByID(edgeDevices[0].DeviceID)
 	if err != nil {
 		log.Errorf("get device error: %s", err)
-		return nil, err
+		return nil, mapRecordNotFound(err, "DEVICE_NOT_FOUND", "连接器关联设备不存在")
 	}
 	nets := []string{}
 	for _, iface := range device.Interfaces {
@@ -447,6 +479,9 @@ func (cp *controlPlane) CreateEdgeScanApplicationTask(_ context.Context, req *v1
 }
 
 func (cp *controlPlane) GetEdgeScanApplicationTask(_ context.Context, req *v1.GetEdgeScanApplicationTaskRequest) (*v1.GetEdgeScanApplicationTaskResponse, error) {
+	if req.EdgeId == 0 {
+		return nil, badRequest("EDGE_ID_REQUIRED", "连接器 ID 不能为空")
+	}
 	tasks, err := cp.repo.ListTasks(&dao.ListTasksQuery{
 		EdgeID:      uint(req.EdgeId),
 		TaskType:    model.TaskTypeScan,

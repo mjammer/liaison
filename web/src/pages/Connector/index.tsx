@@ -49,6 +49,7 @@ import {
   Switch,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import { useRef, useState } from 'react';
@@ -134,23 +135,27 @@ const ConnectorPage: React.FC = () => {
     );
   };
 
-  const handleDiscoverApps = async (edge: API.Edge) => {
+  const getScanDisabledReason = (edge?: API.Edge) => {
+    if (!edge) return '';
     if (edge.status !== 1) {
-      message.warning(
-        tr(
-          '连接器已禁用，无法扫描应用',
-          'Edge is disabled, cannot scan applications',
-        ),
+      return tr(
+        '连接器已禁用，无法扫描应用',
+        'Edge is disabled, cannot scan applications',
       );
-      return;
     }
     if (edge.online !== 1) {
-      message.warning(
-        tr(
-          '连接器不在线，无法扫描应用',
-          'Edge is offline, cannot scan applications',
-        ),
+      return tr(
+        '连接器不在线，无法扫描应用',
+        'Edge is offline, cannot scan applications',
       );
+    }
+    return '';
+  };
+
+  const handleDiscoverApps = async (edge: API.Edge) => {
+    const disabledReason = getScanDisabledReason(edge);
+    if (disabledReason) {
+      message.warning(disabledReason);
       return;
     }
 
@@ -208,6 +213,11 @@ const ConnectorPage: React.FC = () => {
   // 重新扫描应用（强制创建新任务）
   const handleRescan = async () => {
     if (!currentRow?.id) return;
+    const disabledReason = getScanDisabledReason(currentRow);
+    if (disabledReason) {
+      message.warning(disabledReason);
+      return;
+    }
     setScanning(true);
     setScanTask(undefined);
 
@@ -485,9 +495,19 @@ const ConnectorPage: React.FC = () => {
       align: 'center',
       render: (_, record) => (
         <Space>
-          <a onClick={() => handleDiscoverApps(record)}>
-            {tr('扫描应用', 'Scan Apps')}
-          </a>
+          <Tooltip title={getScanDisabledReason(record) || undefined}>
+            <span>
+              <Button
+                type="link"
+                size="small"
+                disabled={!!getScanDisabledReason(record)}
+                style={{ padding: 0, height: 'auto' }}
+                onClick={() => handleDiscoverApps(record)}
+              >
+                {tr('扫描应用', 'Scan Apps')}
+              </Button>
+            </span>
+          </Tooltip>
           <a
             onClick={() => {
               setCurrentRow(record);
@@ -519,17 +539,13 @@ const ConnectorPage: React.FC = () => {
           rowKey="id"
           columns={columns}
           request={async (params) => {
-            console.log('ProTable request params:', params);
             const searchParams = buildSearchParams<API.EdgeListParams>(params, [
               'name',
               'device_name',
             ]);
-            console.log('buildSearchParams result:', searchParams);
             return tableRequest(() => getEdgeList(searchParams), 'edges');
           }}
-          onSubmit={(values) => {
-            console.log('ProTable onSubmit:', values);
-            // 触发表格刷新，此时会使用表单值
+          onSubmit={() => {
             actionRef.current?.reload();
           }}
           toolBarRender={() => [
@@ -879,7 +895,12 @@ const ConnectorPage: React.FC = () => {
               </Text>
               {(scanTask.task_status === 'completed' ||
                 scanTask.task_status === 'failed') && (
-                <Button size="small" onClick={handleRescan} loading={scanning}>
+                <Button
+                  size="small"
+                  onClick={handleRescan}
+                  loading={scanning}
+                  disabled={!!getScanDisabledReason(currentRow)}
+                >
                   {tr('重新扫描', 'Rescan')}
                 </Button>
               )}

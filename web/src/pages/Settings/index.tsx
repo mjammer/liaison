@@ -463,8 +463,22 @@ const SettingsPage: React.FC = () => {
           <Form.Item
             name="expires_in_days"
             label={tr('过期天数（0 或留空表示永不过期）', 'Expires in days (0 or blank = never)')}
+            rules={[
+              {
+                type: 'integer',
+                min: 0,
+                max: 3650,
+                message: tr('请输入 0-3650 之间的整数', 'Enter an integer between 0 and 3650'),
+              },
+            ]}
           >
-            <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+            <InputNumber
+              min={0}
+              max={3650}
+              precision={0}
+              style={{ width: '100%' }}
+              placeholder="0"
+            />
           </Form.Item>
           <Form.Item>
             <Space>

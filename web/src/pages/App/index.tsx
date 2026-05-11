@@ -7,6 +7,7 @@ import {
   getApplicationList,
   getDeviceList,
   getEdgeList,
+  getProxyList,
   updateApplication,
 } from '@/services/api';
 import { executeAction, tableRequest } from '@/utils/request';
@@ -53,6 +54,71 @@ const AppPage: React.FC = () => {
 
   const reload = () => actionRef.current?.reload();
 
+  const isValidIPv4Address = (value: string): boolean => {
+    const parts = value.split('.');
+    if (parts.length !== 4) return false;
+    return parts.every((part) => {
+      if (!/^\d+$/.test(part)) return false;
+      if (part.length > 1 && part.startsWith('0')) return false;
+      const octet = Number(part);
+      return octet >= 0 && octet <= 255;
+    });
+  };
+
+  const isValidApplicationHost = (value: string): boolean => {
+    const host = value.trim();
+    if (
+      !host ||
+      host.length > 253 ||
+      host.includes('/') ||
+      host.includes(' ')
+    ) {
+      return false;
+    }
+    if (host.toLowerCase() === 'localhost') return true;
+    if (host.includes(':')) return false;
+    if (isValidIPv4Address(host)) return true;
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return false;
+    return host.split('.').every((label) => {
+      if (!label || label.length > 63) return false;
+      if (label.startsWith('-') || label.endsWith('-')) return false;
+      return /^[A-Za-z0-9-]+$/.test(label);
+    });
+  };
+
+  const validatePublicPort = async (value?: number) => {
+    if (value === undefined || value === null) return Promise.resolve();
+    if (!Number.isInteger(value) || value < 1 || value > 65535) {
+      return Promise.reject(
+        new Error(
+          tr(
+            '公网端口必须在1-65535之间',
+            'Public port must be between 1 and 65535',
+          ),
+        ),
+      );
+    }
+    try {
+      const res = await getProxyList({ page_size: 10000 });
+      const conflict = res.data?.proxies?.find(
+        (proxy: API.Proxy) => proxy.port === value,
+      );
+      if (conflict) {
+        return Promise.reject(
+          new Error(
+            tr(
+              `公网端口 ${value} 已被访问「${conflict.name}」使用`,
+              `Public port ${value} is already used by entry "${conflict.name}"`,
+            ),
+          ),
+        );
+      }
+    } catch {
+      // 后端仍会做最终冲突校验；列表预校验失败时不阻塞表单。
+    }
+    return Promise.resolve();
+  };
+
   // 加载设备列表
   const loadDeviceOptions = async () => {
     if (deviceOptions.length > 0) return; // 已加载过，不再重复加载
@@ -72,9 +138,9 @@ const AppPage: React.FC = () => {
     return executeAction(
       () =>
         createApplication({
-          name: values.name,
+          name: values.name?.trim(),
           application_type: values.application_type,
-          ip: values.ip,
+          ip: values.ip?.trim(),
           port: values.port,
           edge_id: values.edge_id,
           device_id: values.device_id,
@@ -121,7 +187,7 @@ const AppPage: React.FC = () => {
     const result = await executeAction(
       () =>
         createProxy({
-          name: values.name || currentRow.name,
+          name: values.name?.trim() || currentRow.name,
           description: values.description,
           port: createPort,
           application_id: currentRow.id,
@@ -452,6 +518,23 @@ const AppPage: React.FC = () => {
               required: true,
               message: tr('请输入 IP 地址', 'Please input IP address'),
             },
+            {
+              validator: (_: any, value?: string) => {
+                const trimmed = value?.trim();
+                if (!trimmed) return Promise.resolve();
+                if (!isValidApplicationHost(trimmed)) {
+                  return Promise.reject(
+                    new Error(
+                      tr(
+                        '请输入合法的 IPv4 地址、localhost 或主机名',
+                        'Please input a valid IPv4 address, localhost, or hostname',
+                      ),
+                    ),
+                  );
+                }
+                return Promise.resolve();
+              },
+            },
           ]}
         />
         <ProFormDigit
@@ -460,6 +543,7 @@ const AppPage: React.FC = () => {
           placeholder={tr('请输入端口号', 'Please input port')}
           min={1}
           max={65535}
+          fieldProps={{ precision: 0 }}
           rules={[
             {
               required: true,
@@ -606,6 +690,12 @@ const AppPage: React.FC = () => {
           placeholder={tr('留空自动分配', 'Leave empty for auto allocation')}
           min={1}
           max={65535}
+          fieldProps={{ precision: 0 }}
+          rules={[
+            {
+              validator: (_: any, value?: number) => validatePublicPort(value),
+            },
+          ]}
           extra={tr(
             '映射到公网的端口号，留空则自动分配',
             'Mapped public port, empty means auto allocation',

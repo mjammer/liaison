@@ -2,6 +2,8 @@ package controlplane
 
 import (
 	"context"
+	"net"
+	"strings"
 	"time"
 
 	v1 "github.com/liaisonio/liaison/api/v1"
@@ -46,10 +48,21 @@ func detectApplicationTypeByPort(port int) string {
 }
 
 func (cp *controlPlane) CreateApplication(_ context.Context, req *v1.CreateApplicationRequest) (*v1.CreateApplicationResponse, error) {
+	name := strings.TrimSpace(req.Name)
+	ip := strings.TrimSpace(req.Ip)
+	if name == "" {
+		return nil, badRequest("APPLICATION_NAME_REQUIRED", "应用名称不能为空")
+	}
+	if !isValidApplicationHost(ip) {
+		return nil, badRequest("APPLICATION_IP_INVALID", "请输入合法的应用 IPv4、localhost 或主机名")
+	}
+	if req.EdgeId == 0 {
+		return nil, badRequest("EDGE_ID_REQUIRED", "连接器不能为空")
+	}
 	// 验证 edge 是否存在
 	_, err := cp.repo.GetEdge(req.EdgeId)
 	if err != nil {
-		return nil, err
+		return nil, mapRecordNotFound(err, "EDGE_NOT_FOUND", "连接器不存在")
 	}
 
 	// 根据应用的 IP 地址查找对应的 Device
@@ -57,9 +70,12 @@ func (cp *controlPlane) CreateApplication(_ context.Context, req *v1.CreateAppli
 	if req.DeviceId != nil && *req.DeviceId > 0 {
 		// 如果请求中指定了 device_id，优先使用
 		deviceID = uint(*req.DeviceId)
-	} else if req.Ip != "" {
+		if _, err := cp.repo.GetDeviceByID(deviceID); err != nil {
+			return nil, mapRecordNotFound(err, "DEVICE_NOT_FOUND", "设备不存在")
+		}
+	} else if ip != "" {
 		// 如果 IP 是 127.0.0.1，使用 edge 所在的 device
-		if req.Ip == "127.0.0.1" || req.Ip == "::1" || req.Ip == "localhost" {
+		if ip == "127.0.0.1" || ip == "::1" || strings.EqualFold(ip, "localhost") {
 			// 获取 edge 所在的 device（通过 EdgeDevice 关系表，类型为 Host）
 			hostType := model.EdgeDeviceRelationHost
 			edgeDevices, err := cp.repo.GetEdgeDevicesByEdgeID(req.EdgeId, &hostType)
@@ -68,17 +84,22 @@ func (cp *controlPlane) CreateApplication(_ context.Context, req *v1.CreateAppli
 			}
 		} else {
 			// 根据 IP 查找 Device
-			device, err := cp.repo.GetDeviceByIP(req.Ip)
+			device, err := cp.repo.GetDeviceByIP(ip)
 			if err == nil && device != nil {
 				deviceID = uint(device.ID)
+			} else if err != nil && !isRecordNotFound(err) {
+				return nil, err
 			}
 			// 如果根据 IP 找不到 Device，deviceID 保持为 0
 		}
 	}
 
 	// 处理应用类型和端口
-	appType := req.ApplicationType
+	appType := strings.ToLower(strings.TrimSpace(req.ApplicationType))
 	port := int(req.Port)
+	if port < 0 || port > 65535 {
+		return nil, badRequest("APPLICATION_PORT_INVALID", "应用端口必须在 1-65535 之间")
+	}
 
 	// 如果用户已经指定了应用类型，保持用户的选择，不根据端口推断
 	// 只有当应用类型为空（未指定）时，才根据端口号推断应用类型
@@ -98,12 +119,18 @@ func (cp *controlPlane) CreateApplication(_ context.Context, req *v1.CreateAppli
 	if appType == "" {
 		appType = "tcp"
 	}
+	if !isAllowedApplicationType(appType) {
+		return nil, badRequest("APPLICATION_TYPE_INVALID", "应用类型无效")
+	}
+	if port < 1 || port > 65535 {
+		return nil, badRequest("APPLICATION_PORT_INVALID", "应用端口必须在 1-65535 之间")
+	}
 
 	// 注意如果edge id不在线，应用可能无法访问
 	application := &model.Application{
-		Name:            req.Name,
+		Name:            name,
 		Description:     req.Description,
-		IP:              req.Ip,
+		IP:              ip,
 		Port:            port,
 		ApplicationType: model.ApplicationType(appType),
 		EdgeIDs:         model.UintSlice{uint(req.EdgeId)},
@@ -284,12 +311,19 @@ func (cp *controlPlane) ListApplications(_ context.Context, req *v1.ListApplicat
 }
 
 func (cp *controlPlane) UpdateApplication(_ context.Context, req *v1.UpdateApplicationRequest) (*v1.UpdateApplicationResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("APPLICATION_ID_REQUIRED", "应用 ID 不能为空")
+	}
 	application, err := cp.repo.GetApplicationByID(uint(req.Id))
 	if err != nil {
-		return nil, err
+		return nil, mapRecordNotFound(err, "APPLICATION_NOT_FOUND", "应用不存在")
 	}
 	if req.Name != "" {
-		application.Name = req.Name
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			return nil, badRequest("APPLICATION_NAME_REQUIRED", "应用名称不能为空")
+		}
+		application.Name = name
 	}
 	if req.Description != "" {
 		application.Description = req.Description
@@ -311,6 +345,12 @@ func (cp *controlPlane) UpdateApplication(_ context.Context, req *v1.UpdateAppli
 }
 
 func (cp *controlPlane) DeleteApplication(_ context.Context, req *v1.DeleteApplicationRequest) (*v1.DeleteApplicationResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("APPLICATION_ID_REQUIRED", "应用 ID 不能为空")
+	}
+	if _, err := cp.repo.GetApplicationByID(uint(req.Id)); err != nil {
+		return nil, mapRecordNotFound(err, "APPLICATION_NOT_FOUND", "应用不存在")
+	}
 	if err := cp.deleteApplicationCascade(uint(req.Id), newLifecycleDeleteTracker()); err != nil {
 		return nil, err
 	}
@@ -318,6 +358,68 @@ func (cp *controlPlane) DeleteApplication(_ context.Context, req *v1.DeleteAppli
 		Code:    200,
 		Message: "success",
 	}, nil
+}
+
+func isAllowedApplicationType(appType string) bool {
+	switch appType {
+	case "http", "tcp", "ssh", "rdp", "mysql", "postgresql", "redis", "mongodb", "database":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidApplicationHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" || strings.ContainsAny(host, "/ ") {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.To4() != nil
+	}
+	if looksLikeIPv4(host) {
+		return false
+	}
+	if len(host) > 253 {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	for _, label := range labels {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		for i, r := range label {
+			valid := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-'
+			if !valid {
+				return false
+			}
+			if (i == 0 || i == len(label)-1) && r == '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func looksLikeIPv4(host string) bool {
+	labels := strings.Split(host, ".")
+	if len(labels) != 4 {
+		return false
+	}
+	for _, label := range labels {
+		if label == "" {
+			return false
+		}
+		for _, r := range label {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func transformApplications(applications []*model.Application) []*v1.Application {
