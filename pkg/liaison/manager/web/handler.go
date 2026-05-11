@@ -10,8 +10,23 @@ import (
 	kratoserrors "github.com/go-kratos/kratos/v2/errors"
 	kratoshttp "github.com/go-kratos/kratos/v2/transport/http"
 	v1 "github.com/liaisonio/liaison/api/v1"
+	"github.com/liaisonio/liaison/pkg/liaison/manager/controlplane"
 	"github.com/liaisonio/liaison/pkg/liaison/manager/iam"
 )
+
+func mapServiceError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var httpErr *controlplane.HTTPError
+	if errors.As(err, &httpErr) {
+		return kratoserrors.New(httpErr.Status(), httpErr.Reason(), httpErr.Message())
+	}
+	if errors.Is(err, controlplane.ErrForbidden()) {
+		return kratoserrors.New(403, "FORBIDDEN", "无权访问该资源")
+	}
+	return err
+}
 
 //-- Edge --//
 
@@ -21,7 +36,11 @@ import (
 // @Success 200 {object} v1.CreateEdgeResponse
 // @Router /api/v1/edges [post]
 func (web *web) CreateEdge(ctx context.Context, req *v1.CreateEdgeRequest) (*v1.CreateEdgeResponse, error) {
-	return web.controlPlane.CreateEdge(ctx, req)
+	resp, err := web.controlPlane.CreateEdge(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary GetEdge
@@ -31,7 +50,11 @@ func (web *web) CreateEdge(ctx context.Context, req *v1.CreateEdgeRequest) (*v1.
 // @Success 200 {object} v1.GetEdgeResponse
 // @Router /api/v1/edges/{id} [get]
 func (web *web) GetEdge(ctx context.Context, req *v1.GetEdgeRequest) (*v1.GetEdgeResponse, error) {
-	return web.controlPlane.GetEdge(ctx, req)
+	resp, err := web.controlPlane.GetEdge(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary ListEdges
@@ -40,7 +63,11 @@ func (web *web) GetEdge(ctx context.Context, req *v1.GetEdgeRequest) (*v1.GetEdg
 // @Success 200 {object} v1.ListEdgesResponse
 // @Router /api/v1/edges [get]
 func (web *web) ListEdges(ctx context.Context, req *v1.ListEdgesRequest) (*v1.ListEdgesResponse, error) {
-	return web.controlPlane.ListEdges(ctx, req)
+	resp, err := web.controlPlane.ListEdges(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary UpdateEdge
@@ -50,7 +77,11 @@ func (web *web) ListEdges(ctx context.Context, req *v1.ListEdgesRequest) (*v1.Li
 // @Success 200 {object} v1.UpdateEdgeResponse
 // @Router /api/v1/edges/{id} [put]
 func (web *web) UpdateEdge(ctx context.Context, req *v1.UpdateEdgeRequest) (*v1.UpdateEdgeResponse, error) {
-	return web.controlPlane.UpdateEdge(ctx, req)
+	resp, err := web.controlPlane.UpdateEdge(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary DeleteEdge
@@ -59,7 +90,11 @@ func (web *web) UpdateEdge(ctx context.Context, req *v1.UpdateEdgeRequest) (*v1.
 // @Success 200 {object} v1.DeleteEdgeResponse
 // @Router /api/v1/edges/{id} [delete]
 func (web *web) DeleteEdge(ctx context.Context, req *v1.DeleteEdgeRequest) (*v1.DeleteEdgeResponse, error) {
-	return web.controlPlane.DeleteEdge(ctx, req)
+	resp, err := web.controlPlane.DeleteEdge(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 //-- Device --//
@@ -70,7 +105,11 @@ func (web *web) DeleteEdge(ctx context.Context, req *v1.DeleteEdgeRequest) (*v1.
 // @Success 200 {object} v1.ListDevicesResponse
 // @Router /api/v1/devices [get]
 func (web *web) ListDevices(ctx context.Context, req *v1.ListDevicesRequest) (*v1.ListDevicesResponse, error) {
-	return web.controlPlane.ListDevices(ctx, req)
+	resp, err := web.controlPlane.ListDevices(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary GetDevice
@@ -80,7 +119,11 @@ func (web *web) ListDevices(ctx context.Context, req *v1.ListDevicesRequest) (*v
 // @Success 200 {object} v1.GetDeviceResponse
 // @Router /api/v1/devices/{id} [get]
 func (web *web) GetDevice(ctx context.Context, req *v1.GetDeviceRequest) (*v1.GetDeviceResponse, error) {
-	return web.controlPlane.GetDevice(ctx, req)
+	resp, err := web.controlPlane.GetDevice(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary UpdateDevice
@@ -90,7 +133,11 @@ func (web *web) GetDevice(ctx context.Context, req *v1.GetDeviceRequest) (*v1.Ge
 // @Success 200 {object} v1.UpdateDeviceResponse
 // @Router /api/v1/devices/{id} [put]
 func (web *web) UpdateDevice(ctx context.Context, req *v1.UpdateDeviceRequest) (*v1.UpdateDeviceResponse, error) {
-	return web.controlPlane.UpdateDevice(ctx, req)
+	resp, err := web.controlPlane.UpdateDevice(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary DeleteDevice
@@ -99,7 +146,11 @@ func (web *web) UpdateDevice(ctx context.Context, req *v1.UpdateDeviceRequest) (
 // @Success 200 {object} v1.DeleteDeviceResponse
 // @Router /api/v1/devices/{id} [delete]
 func (web *web) DeleteDevice(ctx context.Context, req *v1.DeleteDeviceRequest) (*v1.DeleteDeviceResponse, error) {
-	return web.controlPlane.DeleteDevice(ctx, req)
+	resp, err := web.controlPlane.DeleteDevice(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 //-- Application --//
@@ -110,7 +161,11 @@ func (web *web) DeleteDevice(ctx context.Context, req *v1.DeleteDeviceRequest) (
 // @Success 200 {object} v1.CreateApplicationResponse
 // @Router /api/v1/applications [post]
 func (web *web) CreateApplication(ctx context.Context, req *v1.CreateApplicationRequest) (*v1.CreateApplicationResponse, error) {
-	return web.controlPlane.CreateApplication(ctx, req)
+	resp, err := web.controlPlane.CreateApplication(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary ListApplications
@@ -119,7 +174,11 @@ func (web *web) CreateApplication(ctx context.Context, req *v1.CreateApplication
 // @Success 200 {object} v1.ListApplicationsResponse
 // @Router /api/v1/applications [get]
 func (web *web) ListApplications(ctx context.Context, req *v1.ListApplicationsRequest) (*v1.ListApplicationsResponse, error) {
-	return web.controlPlane.ListApplications(ctx, req)
+	resp, err := web.controlPlane.ListApplications(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary UpdateApplication
@@ -129,7 +188,11 @@ func (web *web) ListApplications(ctx context.Context, req *v1.ListApplicationsRe
 // @Success 200 {object} v1.UpdateApplicationResponse
 // @Router /api/v1/applications/{id} [put]
 func (web *web) UpdateApplication(ctx context.Context, req *v1.UpdateApplicationRequest) (*v1.UpdateApplicationResponse, error) {
-	return web.controlPlane.UpdateApplication(ctx, req)
+	resp, err := web.controlPlane.UpdateApplication(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary DeleteApplication
@@ -138,7 +201,11 @@ func (web *web) UpdateApplication(ctx context.Context, req *v1.UpdateApplication
 // @Success 200 {object} v1.DeleteApplicationResponse
 // @Router /api/v1/applications/{id} [delete]
 func (web *web) DeleteApplication(ctx context.Context, req *v1.DeleteApplicationRequest) (*v1.DeleteApplicationResponse, error) {
-	return web.controlPlane.DeleteApplication(ctx, req)
+	resp, err := web.controlPlane.DeleteApplication(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 //-- Proxy --//
@@ -149,7 +216,11 @@ func (web *web) DeleteApplication(ctx context.Context, req *v1.DeleteApplication
 // @Success 200 {object} v1.ListProxiesResponse
 // @Router /api/v1/proxies [get]
 func (web *web) ListProxies(ctx context.Context, req *v1.ListProxiesRequest) (*v1.ListProxiesResponse, error) {
-	return web.controlPlane.ListProxies(ctx, req)
+	resp, err := web.controlPlane.ListProxies(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary CreateProxy
@@ -158,7 +229,11 @@ func (web *web) ListProxies(ctx context.Context, req *v1.ListProxiesRequest) (*v
 // @Success 200 {object} v1.CreateProxyResponse
 // @Router /api/v1/proxies [post]
 func (web *web) CreateProxy(ctx context.Context, req *v1.CreateProxyRequest) (*v1.CreateProxyResponse, error) {
-	return web.controlPlane.CreateProxy(ctx, req)
+	resp, err := web.controlPlane.CreateProxy(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary UpdateProxy
@@ -168,7 +243,11 @@ func (web *web) CreateProxy(ctx context.Context, req *v1.CreateProxyRequest) (*v
 // @Success 200 {object} v1.UpdateProxyResponse
 // @Router /api/v1/proxies/{id} [put]
 func (web *web) UpdateProxy(ctx context.Context, req *v1.UpdateProxyRequest) (*v1.UpdateProxyResponse, error) {
-	return web.controlPlane.UpdateProxy(ctx, req)
+	resp, err := web.controlPlane.UpdateProxy(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary DeleteProxy
@@ -177,7 +256,11 @@ func (web *web) UpdateProxy(ctx context.Context, req *v1.UpdateProxyRequest) (*v
 // @Success 200 {object} v1.DeleteProxyResponse
 // @Router /api/v1/proxies/{id} [delete]
 func (web *web) DeleteProxy(ctx context.Context, req *v1.DeleteProxyRequest) (*v1.DeleteProxyResponse, error) {
-	return web.controlPlane.DeleteProxy(ctx, req)
+	resp, err := web.controlPlane.DeleteProxy(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 //-- Traffic Metric --//
@@ -188,7 +271,11 @@ func (web *web) DeleteProxy(ctx context.Context, req *v1.DeleteProxyRequest) (*v
 // @Success 200 {object} v1.ListTrafficMetricsResponse
 // @Router /api/v1/traffic-metrics [get]
 func (web *web) ListTrafficMetrics(ctx context.Context, req *v1.ListTrafficMetricsRequest) (*v1.ListTrafficMetricsResponse, error) {
-	return web.controlPlane.ListTrafficMetrics(ctx, req)
+	resp, err := web.controlPlane.ListTrafficMetrics(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 //-- Task --//
@@ -199,7 +286,11 @@ func (web *web) ListTrafficMetrics(ctx context.Context, req *v1.ListTrafficMetri
 // @Success 200 {object} v1.CreateEdgeScanApplicationTaskResponse
 // @Router /api/v1/edges/{edge_id}/scan_application_tasks [post]
 func (web *web) CreateEdgeScanApplicationTask(ctx context.Context, req *v1.CreateEdgeScanApplicationTaskRequest) (*v1.CreateEdgeScanApplicationTaskResponse, error) {
-	return web.controlPlane.CreateEdgeScanApplicationTask(ctx, req)
+	resp, err := web.controlPlane.CreateEdgeScanApplicationTask(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 // @Summary GetEdgeScanApplicationTask
@@ -208,7 +299,11 @@ func (web *web) CreateEdgeScanApplicationTask(ctx context.Context, req *v1.Creat
 // @Success 200 {object} v1.GetEdgeScanApplicationTaskResponse
 // @Router /api/v1/edges/{edge_id}/scan_application_tasks [get]
 func (web *web) GetEdgeScanApplicationTask(ctx context.Context, req *v1.GetEdgeScanApplicationTaskRequest) (*v1.GetEdgeScanApplicationTaskResponse, error) {
-	return web.controlPlane.GetEdgeScanApplicationTask(ctx, req)
+	resp, err := web.controlPlane.GetEdgeScanApplicationTask(ctx, req)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+	return resp, nil
 }
 
 //-- Auth --//
@@ -382,6 +477,12 @@ func (web *web) ChangePassword(ctx context.Context, req *v1.ChangePasswordReques
 	// 调用IAM服务修改密码
 	err := web.iamService.ChangePassword(userID.(uint), iamReq)
 	if err != nil {
+		if err.Error() == "invalid old password" {
+			return nil, kratoserrors.New(400, "INVALID_OLD_PASSWORD", "当前密码错误")
+		}
+		if err.Error() == "user not found" {
+			return nil, kratoserrors.New(404, "USER_NOT_FOUND", "用户不存在")
+		}
 		return nil, err
 	}
 

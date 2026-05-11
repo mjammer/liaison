@@ -15,6 +15,9 @@ import (
 const localTimeFormat = "2006-01-02T15:04:05"
 
 func (cp *controlPlane) ListTrafficMetrics(_ context.Context, req *v1.ListTrafficMetricsRequest) (*v1.ListTrafficMetricsResponse, error) {
+	if req.Limit < 0 || req.Limit > 10000 {
+		return nil, badRequest("TRAFFIC_LIMIT_INVALID", "流量查询 limit 必须在 0-10000 之间")
+	}
 	query := &dao.ListTrafficMetricsQuery{
 		Limit: int(req.Limit),
 	}
@@ -37,26 +40,21 @@ func (cp *controlPlane) ListTrafficMetrics(_ context.Context, req *v1.ListTraffi
 
 	// 解析时间范围（前端发送的是本地时间或RFC3339格式）
 	if req.StartTime != "" {
-		// 尝试解析RFC3339格式，如果失败则尝试本地时间格式
-		startTime, err := time.Parse(time.RFC3339, req.StartTime)
+		startTime, err := parseTrafficTime(req.StartTime)
 		if err != nil {
-			startTime, err = time.Parse(localTimeFormat, req.StartTime)
+			return nil, badRequest("TRAFFIC_START_TIME_INVALID", "开始时间格式无效")
 		}
-		if err == nil {
-			// 使用本地时间用于查询
-			query.StartTime = &startTime
-		}
+		query.StartTime = &startTime
 	}
 	if req.EndTime != "" {
-		// 尝试解析RFC3339格式，如果失败则尝试本地时间格式
-		endTime, err := time.Parse(time.RFC3339, req.EndTime)
+		endTime, err := parseTrafficTime(req.EndTime)
 		if err != nil {
-			endTime, err = time.Parse(localTimeFormat, req.EndTime)
+			return nil, badRequest("TRAFFIC_END_TIME_INVALID", "结束时间格式无效")
 		}
-		if err == nil {
-			// 使用本地时间用于查询
-			query.EndTime = &endTime
-		}
+		query.EndTime = &endTime
+	}
+	if query.StartTime != nil && query.EndTime != nil && query.StartTime.After(*query.EndTime) {
+		return nil, badRequest("TRAFFIC_TIME_RANGE_INVALID", "开始时间不能晚于结束时间")
 	}
 
 	// 如果没有设置 limit，根据时间范围计算合理的limit
@@ -183,4 +181,12 @@ func (cp *controlPlane) ListTrafficMetrics(_ context.Context, req *v1.ListTraffi
 			Metrics: metricsV1,
 		},
 	}, nil
+}
+
+func parseTrafficTime(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err == nil {
+		return parsed, nil
+	}
+	return time.Parse(localTimeFormat, value)
 }

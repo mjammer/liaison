@@ -103,10 +103,10 @@ func (cp *controlPlane) DeleteProxyFirewall(ctx context.Context, proxyID uint) e
 func (cp *controlPlane) getProxyForFirewall(proxyID uint) (*model.Proxy, error) {
 	proxy, err := cp.repo.GetProxyByID(proxyID)
 	if err != nil {
-		return nil, err
+		return nil, mapRecordNotFound(err, "PROXY_NOT_FOUND", "访问不存在")
 	}
 	if proxy == nil {
-		return nil, fmt.Errorf("proxy not found")
+		return nil, notFound("PROXY_NOT_FOUND", "访问不存在", nil)
 	}
 	return proxy, nil
 }

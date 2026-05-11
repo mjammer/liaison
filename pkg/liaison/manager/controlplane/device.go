@@ -48,9 +48,12 @@ func (cp *controlPlane) ListDevices(_ context.Context, req *v1.ListDevicesReques
 }
 
 func (cp *controlPlane) GetDevice(_ context.Context, req *v1.GetDeviceRequest) (*v1.GetDeviceResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("DEVICE_ID_REQUIRED", "设备 ID 不能为空")
+	}
 	device, err := cp.repo.GetDeviceByID(uint(req.Id))
 	if err != nil {
-		return nil, err
+		return nil, mapRecordNotFound(err, "DEVICE_NOT_FOUND", "设备不存在")
 	}
 	// 获取网卡
 	interfaces, err := cp.repo.GetEthernetInterfacesByDeviceID(uint(device.ID))
@@ -68,11 +71,17 @@ func (cp *controlPlane) GetDevice(_ context.Context, req *v1.GetDeviceRequest) (
 }
 
 func (cp *controlPlane) UpdateDevice(_ context.Context, req *v1.UpdateDeviceRequest) (*v1.UpdateDeviceResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("DEVICE_ID_REQUIRED", "设备 ID 不能为空")
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return nil, badRequest("DEVICE_NAME_REQUIRED", "设备名称不能为空")
+	}
 	device, err := cp.repo.GetDeviceByID(uint(req.Id))
 	if err != nil {
-		return nil, err
+		return nil, mapRecordNotFound(err, "DEVICE_NOT_FOUND", "设备不存在")
 	}
-	device.Name = req.Name
+	device.Name = strings.TrimSpace(req.Name)
 	device.Description = req.Description
 	err = cp.repo.UpdateDevice(device)
 	if err != nil {
@@ -85,6 +94,12 @@ func (cp *controlPlane) UpdateDevice(_ context.Context, req *v1.UpdateDeviceRequ
 }
 
 func (cp *controlPlane) DeleteDevice(_ context.Context, req *v1.DeleteDeviceRequest) (*v1.DeleteDeviceResponse, error) {
+	if req.Id == 0 {
+		return nil, badRequest("DEVICE_ID_REQUIRED", "设备 ID 不能为空")
+	}
+	if _, err := cp.repo.GetDeviceByID(uint(req.Id)); err != nil {
+		return nil, mapRecordNotFound(err, "DEVICE_NOT_FOUND", "设备不存在")
+	}
 	if err := cp.deleteDeviceCascade(uint(req.Id), newLifecycleDeleteTracker()); err != nil {
 		return nil, err
 	}

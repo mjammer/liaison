@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/liaisonio/liaison/pkg/liaison/manager/controlplane"
 )
 
 // upsertFirewallRequest is the body of PUT /api/v1/proxies/{id}/firewall.
@@ -116,6 +118,10 @@ func parseFirewallProxyID(r *http.Request) (uint, error) {
 }
 
 func firewallHTTPStatus(err error) int {
+	var httpErr *controlplane.HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.Status()
+	}
 	// Only ErrForbidden is mapped to 403 for now; everything else is a bad
 	// request (invalid CIDR, missing proxy, etc.).
 	if errors.Is(err, errUnauthorized) {

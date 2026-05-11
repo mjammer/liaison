@@ -237,37 +237,37 @@ func (cp *controlPlane) proxyRuntimeEligible(proxy *model.Proxy, application *mo
 		return false, nil
 	}
 	if application == nil {
-		return false, errors.New("proxy application is missing")
+		return false, notFound("APPLICATION_NOT_FOUND", "关联应用不存在", nil)
 	}
 	if len(application.EdgeIDs) == 0 {
-		return false, errors.New("application has no edge")
+		return false, conflict("APPLICATION_EDGE_MISSING", "关联应用未绑定连接器")
 	}
 	edge, err := cp.repo.GetEdge(uint64(application.EdgeIDs[0]))
 	if err != nil {
-		return false, fmt.Errorf("application edge %d is missing: %w", application.EdgeIDs[0], err)
+		return false, mapRecordNotFound(err, "EDGE_NOT_FOUND", "关联连接器不存在")
 	}
 	if edge.Status == model.EdgeStatusStopped {
 		return false, nil
 	}
 	if edge.Status != model.EdgeStatusRunning {
-		return false, fmt.Errorf("unknown edge status %d", edge.Status)
+		return false, conflict("EDGE_STATUS_INVALID", "连接器状态无效")
 	}
 	return true, nil
 }
 
 func (cp *controlPlane) validateProxyApplication(application *model.Application) (*model.Edge, error) {
 	if application == nil {
-		return nil, errors.New("application is missing")
+		return nil, notFound("APPLICATION_NOT_FOUND", "关联应用不存在", nil)
 	}
 	if len(application.EdgeIDs) == 0 {
-		return nil, errors.New("application has no edge")
+		return nil, conflict("APPLICATION_EDGE_MISSING", "关联应用未绑定连接器")
 	}
 	edge, err := cp.repo.GetEdge(uint64(application.EdgeIDs[0]))
 	if err != nil {
-		return nil, err
+		return nil, mapRecordNotFound(err, "EDGE_NOT_FOUND", "关联连接器不存在")
 	}
 	if edge.Status != model.EdgeStatusRunning && edge.Status != model.EdgeStatusStopped {
-		return nil, fmt.Errorf("unknown edge status %d", edge.Status)
+		return nil, conflict("EDGE_STATUS_INVALID", "连接器状态无效")
 	}
 	return edge, nil
 }
@@ -304,9 +304,16 @@ func (cp *controlPlane) ensureProxyPortAvailable(port int, excludeProxyID uint) 
 		return err
 	}
 	if conflict != nil {
-		return fmt.Errorf("public port %d is already used by proxy %d", port, conflict.ID)
+		return conflictErrorForProxyPort(port, conflict.ID)
 	}
 	return nil
+}
+
+func conflictErrorForProxyPort(port int, proxyID uint) error {
+	return conflict(
+		"PROXY_PORT_CONFLICT",
+		fmt.Sprintf("公网端口 %d 已被访问 %d 使用", port, proxyID),
+	)
 }
 
 func (cp *controlPlane) findProxyPortConflict(port int, excludeProxyID uint) (*model.Proxy, error) {

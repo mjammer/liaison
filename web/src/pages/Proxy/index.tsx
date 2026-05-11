@@ -92,16 +92,67 @@ const ProxyPage: React.FC = () => {
   const [clientIP, setClientIP] = useState<string | null>(null);
   const [firewallSaving, setFirewallSaving] = useState(false);
 
+  const isValidIPv4Address = (value: string): boolean => {
+    const parts = value.split('.');
+    if (parts.length !== 4) return false;
+    return parts.every((part) => {
+      if (!/^\d+$/.test(part)) return false;
+      if (part.length > 1 && part.startsWith('0')) return false;
+      const octet = Number(part);
+      return octet >= 0 && octet <= 255;
+    });
+  };
+
   // IPv4 地址或带前缀的 IPv4 CIDR。纯 IP 保存时会自动补 /32。
   const isValidCIDR = (value: string): boolean => {
     const trimmed = value.trim();
-    return /^([0-9]{1,3}\.){3}[0-9]{1,3}(\/([0-9]|[12][0-9]|3[0-2]))?$/.test(
-      trimmed,
-    );
+    const parts = trimmed.split('/');
+    if (parts.length > 2 || !isValidIPv4Address(parts[0])) return false;
+    if (parts.length === 1) return true;
+    if (!/^\d+$/.test(parts[1])) return false;
+    const prefix = Number(parts[1]);
+    return prefix >= 0 && prefix <= 32;
   };
   const normalizeCIDR = (value: string) => {
     const trimmed = value.trim();
     return trimmed.includes('/') ? trimmed : `${trimmed}/32`;
+  };
+
+  const validatePublicPort = async (
+    value?: number,
+    excludeProxyID?: number,
+  ) => {
+    if (value === undefined || value === null) return Promise.resolve();
+    if (!Number.isInteger(value) || value < 1 || value > 65535) {
+      return Promise.reject(
+        new Error(
+          tr(
+            '公网端口必须在1-65535之间',
+            'Public port must be between 1 and 65535',
+          ),
+        ),
+      );
+    }
+    try {
+      const res = await getProxyList({ page_size: 10000 });
+      const conflict = res.data?.proxies?.find(
+        (proxy: API.Proxy) =>
+          proxy.port === value && proxy.id !== excludeProxyID,
+      );
+      if (conflict) {
+        return Promise.reject(
+          new Error(
+            tr(
+              `公网端口 ${value} 已被访问「${conflict.name}」使用`,
+              `Public port ${value} is already used by entry "${conflict.name}"`,
+            ),
+          ),
+        );
+      }
+    } catch {
+      // 后端仍会做最终冲突校验；列表预校验失败时不阻塞表单。
+    }
+    return Promise.resolve();
   };
 
   const openFirewallDrawer = async (record: API.Proxy) => {
@@ -197,6 +248,18 @@ const ProxyPage: React.FC = () => {
   const handleFirewallSave = async () => {
     const record = firewallDrawer.record;
     if (!record?.id) return;
+    const invalidCIDR = firewallDrawer.draftCIDRs.find(
+      (cidr) => !isValidCIDR(cidr),
+    );
+    if (invalidCIDR) {
+      message.error(
+        tr(
+          `来源规则 ${invalidCIDR} 不是合法的 IPv4 CIDR`,
+          `Source rule ${invalidCIDR} is not a valid IPv4 CIDR`,
+        ),
+      );
+      return;
+    }
     setFirewallSaving(true);
     await executeAction(
       () =>
@@ -423,7 +486,7 @@ const ProxyPage: React.FC = () => {
     const result = await executeAction(
       () =>
         createProxy({
-          name: values.name,
+          name: values.name?.trim(),
           description: values.description,
           port: createPort,
           application_id: values.application_id,
@@ -449,7 +512,7 @@ const ProxyPage: React.FC = () => {
     return executeAction(
       () =>
         updateProxy(currentRow.id, {
-          name: values.name,
+          name: values.name?.trim(),
           description: values.description,
           port: values.port,
         }),
@@ -775,6 +838,12 @@ const ProxyPage: React.FC = () => {
           placeholder={tr('留空自动分配', 'Leave empty for auto allocation')}
           min={1}
           max={65535}
+          fieldProps={{ precision: 0 }}
+          rules={[
+            {
+              validator: (_: any, value?: number) => validatePublicPort(value),
+            },
+          ]}
           extra={tr(
             '映射到公网的端口号，留空则自动分配',
             'Mapped public port, empty means auto allocation',
@@ -813,6 +882,13 @@ const ProxyPage: React.FC = () => {
           placeholder={tr('请输入端口', 'Please input port')}
           min={1}
           max={65535}
+          fieldProps={{ precision: 0 }}
+          rules={[
+            {
+              validator: (_: any, value?: number) =>
+                validatePublicPort(value, currentRow?.id),
+            },
+          ]}
         />
         <ProFormTextArea
           name="description"
