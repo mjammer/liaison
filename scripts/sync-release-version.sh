@@ -48,9 +48,6 @@ for file in "${README_FILES[@]}"; do
         s{liaison-[0-9]+\.[0-9]+\.[0-9]+-(linux|docker)-amd64\.tar\.gz}{liaison-$version-$1-amd64.tar.gz}g;
         s{cd liaison-[0-9]+\.[0-9]+\.[0-9]+-(linux|docker)-amd64}{cd liaison-$version-$1-amd64}g;
 
-        s{Liaison_0\.1\.0_universal\.dmg}{Liaison-Desktop-dev-feat-desktop-client-macOS-universal.dmg}g;
-        s{Liaison_0\.1\.0_x64_en-US\.msi}{Liaison-Desktop-dev-feat-desktop-client-Windows-x64.msi}g;
-        s{Liaison_0\.1\.0_x64-setup\.exe}{Liaison-Desktop-dev-feat-desktop-client-Windows-x64-setup.exe}g;
     ' "$file"
 done
 
