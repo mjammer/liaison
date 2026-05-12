@@ -99,7 +99,7 @@ DOCKER_WORKDIR = -w /build
 DOCKER_BASE = docker run --rm $(DOCKER_VOLUME) $(DOCKER_WORKDIR)
 DOCKER_HOST_UID := $(shell id -u 2>/dev/null || echo 0)
 DOCKER_HOST_GID := $(shell id -g 2>/dev/null || echo 0)
-GO_BUILD_FLAGS = -trimpath -ldflags '-s -w'
+GO_BUILD_FLAGS = -trimpath -buildvcs=false -ldflags '-s -w'
 
 # Ensure Docker image exists (pull only if not present locally)
 .PHONY: docker-image
