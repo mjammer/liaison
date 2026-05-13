@@ -367,17 +367,9 @@ const WebDesktopPage: React.FC = () => {
         up: false,
         down: false,
       };
-      let mouseMoveFrame: number | undefined;
       const sendMouseStateNow = () => {
         if (clientRef.current !== client) return;
         client.sendMouseState({ ...mouseState });
-      };
-      const scheduleMouseMoveState = () => {
-        if (mouseMoveFrame !== undefined) return;
-        mouseMoveFrame = window.requestAnimationFrame(() => {
-          mouseMoveFrame = undefined;
-          sendMouseStateNow();
-        });
       };
       const updateMousePosition = (event: MouseEvent | WheelEvent) => {
         const rect = inputPlane.getBoundingClientRect();
@@ -404,7 +396,13 @@ const WebDesktopPage: React.FC = () => {
       const handleMouseMove = (event: MouseEvent) => {
         event.preventDefault();
         updateMousePosition(event);
-        scheduleMouseMoveState();
+        sendMouseStateNow();
+      };
+      const handlePointerDown = (event: PointerEvent) => {
+        inputPlane.setPointerCapture?.(event.pointerId);
+      };
+      const handlePointerUp = (event: PointerEvent) => {
+        inputPlane.releasePointerCapture?.(event.pointerId);
       };
       const handleMouseDown = (event: MouseEvent) => {
         event.preventDefault();
@@ -441,7 +439,16 @@ const WebDesktopPage: React.FC = () => {
         event.preventDefault();
       };
       const handleClick = () => inputPlane.focus({ preventScroll: true });
-      inputPlane.addEventListener('mousemove', handleMouseMove);
+      const mouseMoveEvent =
+        'onpointerrawupdate' in window
+          ? 'pointerrawupdate'
+          : 'onpointermove' in window
+          ? 'pointermove'
+          : 'mousemove';
+      inputPlane.addEventListener(mouseMoveEvent, handleMouseMove);
+      inputPlane.addEventListener('pointerdown', handlePointerDown);
+      inputPlane.addEventListener('pointerup', handlePointerUp);
+      inputPlane.addEventListener('pointercancel', handlePointerUp);
       inputPlane.addEventListener('mousedown', handleMouseDown);
       inputPlane.addEventListener('mouseup', handleMouseUp);
       inputPlane.addEventListener('mouseleave', handleMouseLeave);
@@ -452,15 +459,17 @@ const WebDesktopPage: React.FC = () => {
         inputPlane.style.cursor = `url(${canvas.toDataURL(
           'image/png',
         )}) ${x} ${y}, auto`;
+        display.showCursor(false);
       };
+      display.showCursor(false);
       mouseRef.current = {
         cleanup: () => {
-          if (mouseMoveFrame !== undefined) {
-            window.cancelAnimationFrame(mouseMoveFrame);
-          }
           resizeObserver?.disconnect();
           window.removeEventListener('resize', scheduleDisplayFit);
-          inputPlane.removeEventListener('mousemove', handleMouseMove);
+          inputPlane.removeEventListener(mouseMoveEvent, handleMouseMove);
+          inputPlane.removeEventListener('pointerdown', handlePointerDown);
+          inputPlane.removeEventListener('pointerup', handlePointerUp);
+          inputPlane.removeEventListener('pointercancel', handlePointerUp);
           inputPlane.removeEventListener('mousedown', handleMouseDown);
           inputPlane.removeEventListener('mouseup', handleMouseUp);
           inputPlane.removeEventListener('mouseleave', handleMouseLeave);

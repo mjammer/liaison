@@ -298,6 +298,7 @@ func (web *web) handleWebDesktopConnectHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer conn.Close()
+	tuneLowLatencyTCP(conn.UnderlyingConn())
 	conn.SetReadLimit(webDesktopMaxMessageSize)
 	web.runWebDesktop(context.WithoutCancel(r.Context()), conn, session)
 }
@@ -420,7 +421,7 @@ func (web *web) handshakeGuacd(conn net.Conn, targetAddr *net.TCPAddr, session *
 	if err := writeGuacInstruction(conn, "video"); err != nil {
 		return err
 	}
-	if err := writeGuacInstruction(conn, "image", "image/png", "image/jpeg"); err != nil {
+	if err := writeGuacInstruction(conn, "image", "image/jpeg", "image/png"); err != nil {
 		return err
 	}
 	values := make([]string, 0, len(args.Args))
@@ -458,7 +459,7 @@ func (web *web) guacdArgValue(name string, targetAddr *net.TCPAddr, session *web
 	case "enable-theming":
 		return "false"
 	case "enable-font-smoothing":
-		return "true"
+		return "false"
 	case "enable-full-window-drag":
 		return "false"
 	case "enable-desktop-composition":
@@ -468,7 +469,13 @@ func (web *web) guacdArgValue(name string, targetAddr *net.TCPAddr, session *web
 	case "disable-bitmap-caching", "disable-offscreen-caching", "disable-glyph-caching":
 		return "false"
 	case "color-depth":
-		return "32"
+		return "16"
+	case "force-lossless":
+		return "false"
+	case "disable-audio":
+		return "true"
+	case "enable-audio-input":
+		return "false"
 	case "read-only":
 		return "false"
 	case "width":

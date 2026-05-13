@@ -66,3 +66,20 @@ func TestNormalizeWebDesktopSize(t *testing.T) {
 		t.Fatalf("clamped = %dx%d@%d", width, height, dpi)
 	}
 }
+
+func TestWebDesktopGuacdLowLatencyDefaults(t *testing.T) {
+	srv := &web{}
+	session := &webDesktopSession{width: 1280, height: 720, dpi: 96}
+	cases := map[string]string{
+		"color-depth":           "16",
+		"disable-audio":         "true",
+		"enable-audio-input":    "false",
+		"enable-font-smoothing": "false",
+		"force-lossless":        "false",
+	}
+	for name, want := range cases {
+		if got := srv.guacdArgValue(name, nil, session); got != want {
+			t.Fatalf("guacdArgValue(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
