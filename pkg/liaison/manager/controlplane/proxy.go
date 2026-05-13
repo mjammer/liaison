@@ -31,7 +31,7 @@ func (cp *controlPlane) CreateProxy(_ context.Context, req *v1.CreateProxyReques
 		return nil, badRequest("APPLICATION_ID_REQUIRED", "关联应用不能为空")
 	}
 	if req.Port < 0 || req.Port > 65535 {
-		return nil, badRequest("PROXY_PORT_INVALID", "公网端口必须在 1-65535 之间，或留空自动分配")
+		return nil, badRequest("PROXY_PORT_INVALID", "公网端口必须在 1-65535 之间；SSH/RDP/VNC 可留空仅通过网页访问")
 	}
 	application, err := cp.repo.GetApplicationByID(uint(req.ApplicationId))
 	if err != nil {
@@ -43,14 +43,12 @@ func (cp *controlPlane) CreateProxy(_ context.Context, req *v1.CreateProxyReques
 		return nil, err
 	}
 
-	requestedPort := int(req.Port)
+	requestedPort, err := cp.resolveCreateProxyPort(application, int(req.Port), req.ExposePublicPort)
+	if err != nil {
+		return nil, err
+	}
 	if requestedPort > 0 {
 		if err := cp.ensureProxyPortAvailable(requestedPort, 0); err != nil {
-			return nil, err
-		}
-	} else if edge.Status == model.EdgeStatusStopped {
-		requestedPort, err = cp.allocateAvailableProxyPort(0)
-		if err != nil {
 			return nil, err
 		}
 	}
@@ -170,6 +168,10 @@ func (cp *controlPlane) UpdateProxy(_ context.Context, req *v1.UpdateProxyReques
 	if err != nil {
 		return nil, mapRecordNotFound(err, "PROXY_NOT_FOUND", "访问不存在")
 	}
+	application, applicationErr := cp.repo.GetApplicationByID(proxy.ApplicationID)
+	if applicationErr != nil {
+		return nil, mapRecordNotFound(applicationErr, "APPLICATION_NOT_FOUND", "关联应用不存在")
+	}
 
 	oldProxy := *proxy
 
@@ -183,7 +185,13 @@ func (cp *controlPlane) UpdateProxy(_ context.Context, req *v1.UpdateProxyReques
 	if req.Description != "" {
 		proxy.Description = req.Description
 	}
-	if req.Port > 0 && int(req.Port) != proxy.Port {
+	if req.ExposePublicPort != nil {
+		port, err := cp.resolveUpdateProxyPort(application, proxy, int(req.Port), req.GetExposePublicPort())
+		if err != nil {
+			return nil, err
+		}
+		proxy.Port = port
+	} else if req.Port > 0 && int(req.Port) != proxy.Port {
 		if err := cp.ensureProxyPortAvailable(int(req.Port), proxy.ID); err != nil {
 			return nil, err
 		}
@@ -204,17 +212,8 @@ func (cp *controlPlane) UpdateProxy(_ context.Context, req *v1.UpdateProxyReques
 	portChanged := oldProxy.Port != proxy.Port
 	runtimeChanged := statusChanged || portChanged
 
-	var application *model.Application
-	var applicationErr error
-	if proxy.Status == model.ProxyStatusRunning || oldProxy.Status == model.ProxyStatusRunning {
-		application, applicationErr = cp.repo.GetApplicationByID(proxy.ApplicationID)
-	}
-	if proxy.Status == model.ProxyStatusRunning && applicationErr != nil {
-		return nil, mapRecordNotFound(applicationErr, "APPLICATION_NOT_FOUND", "关联应用不存在")
-	}
-
 	oldRuntimeEligible := false
-	if oldProxy.Status == model.ProxyStatusRunning && applicationErr == nil {
+	if oldProxy.Status == model.ProxyStatusRunning {
 		oldRuntimeEligible, _ = cp.proxyRuntimeEligible(&oldProxy, application)
 	}
 	newRuntimeEligible := false
@@ -341,7 +340,58 @@ func (cp *controlPlane) transformProxy(proxy *model.Proxy) *v1.Proxy {
 		AccessUrl:              accessURL,
 		EffectiveStatus:        effectiveStatus,
 		EffectiveStatusMessage: effectiveStatusMessage,
+		ExposePublicPort:       proxy.Port > 0,
 	}
+}
+
+func (cp *controlPlane) resolveCreateProxyPort(application *model.Application, requestedPort int, exposePublicPort bool) (int, error) {
+	if application == nil {
+		return 0, notFound("APPLICATION_NOT_FOUND", "关联应用不存在", nil)
+	}
+	if requestedPort < 0 || requestedPort > 65535 {
+		return 0, badRequest("PROXY_PORT_INVALID", "公网端口必须在 1-65535 之间")
+	}
+	webCapable := isWebOnlyCapableApplicationType(application.ApplicationType)
+	expose := !webCapable || exposePublicPort
+	if !expose {
+		return 0, nil
+	}
+	if requestedPort > 0 {
+		return requestedPort, nil
+	}
+	return cp.allocateAvailableProxyPort(0)
+}
+
+func (cp *controlPlane) resolveUpdateProxyPort(application *model.Application, proxy *model.Proxy, requestedPort int, exposePublicPort bool) (int, error) {
+	if application == nil || proxy == nil {
+		return 0, notFound("APPLICATION_NOT_FOUND", "关联应用不存在", nil)
+	}
+	if requestedPort < 0 || requestedPort > 65535 {
+		return 0, badRequest("PROXY_PORT_INVALID", "公网端口必须在 1-65535 之间")
+	}
+	webCapable := isWebOnlyCapableApplicationType(application.ApplicationType)
+	if !exposePublicPort {
+		if !webCapable {
+			return 0, badRequest("PROXY_PUBLIC_PORT_REQUIRED", "该应用类型必须开放公网端口")
+		}
+		return 0, nil
+	}
+	if requestedPort > 0 {
+		if requestedPort != proxy.Port {
+			if err := cp.ensureProxyPortAvailable(requestedPort, proxy.ID); err != nil {
+				return 0, err
+			}
+		}
+		return requestedPort, nil
+	}
+	if proxy.Port > 0 {
+		return proxy.Port, nil
+	}
+	port, err := cp.allocateAvailableProxyPort(proxy.ID)
+	if err != nil {
+		return 0, err
+	}
+	return port, nil
 }
 
 func proxyStatusString(status model.ProxyStatus) string {

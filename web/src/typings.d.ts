@@ -190,6 +190,7 @@ declare namespace API {
     created_at: string;
     updated_at: string;
     access_url?: string;
+    expose_public_port?: boolean;
   }
 
   interface ProxyListResult {
@@ -205,6 +206,7 @@ declare namespace API {
     name: string;
     description?: string;
     port?: number;
+    expose_public_port?: boolean;
     application_id: number;
   }
 
@@ -212,6 +214,7 @@ declare namespace API {
     name?: string;
     description?: string;
     port?: number;
+    expose_public_port?: boolean;
     status?: string;
   }
 
@@ -253,6 +256,50 @@ declare namespace API {
     token: string;
     ws_url: string;
     expires_at: string;
+  }
+
+  // ========== WebDesktop ==========
+  interface WebDesktopCredential {
+    saved: boolean;
+    protocol: string;
+    username?: string;
+    domain?: string;
+    last_used_at?: string;
+  }
+
+  interface WebDesktopTarget {
+    proxy_id: number;
+    proxy_name: string;
+    application_id: number;
+    application_name: string;
+    protocol: 'rdp' | 'vnc';
+    target_host: string;
+    target_port: number;
+    effective_status: string;
+    effective_status_message?: string;
+    credentials?: WebDesktopCredential[];
+  }
+
+  interface CreateWebDesktopSessionRequest {
+    username?: string;
+    password?: string;
+    domain?: string;
+    save_credential?: boolean;
+    width?: number;
+    height?: number;
+    dpi?: number;
+  }
+
+  interface CreateWebDesktopSessionResponse {
+    token: string;
+    ws_url: string;
+    expires_at: string;
+  }
+
+  interface DeleteWebDesktopCredentialParams {
+    protocol: string;
+    username?: string;
+    domain?: string;
   }
 
   // ========== 流量监控 (Traffic Metric) ==========

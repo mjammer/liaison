@@ -2213,6 +2213,7 @@ type Proxy struct {
 	AccessUrl              string                 `protobuf:"bytes,9,opt,name=access_url,proto3" json:"access_url,omitempty"`
 	EffectiveStatus        string                 `protobuf:"bytes,10,opt,name=effective_status,proto3" json:"effective_status,omitempty"`
 	EffectiveStatusMessage string                 `protobuf:"bytes,11,opt,name=effective_status_message,proto3" json:"effective_status_message,omitempty"`
+	ExposePublicPort       bool                   `protobuf:"varint,12,opt,name=expose_public_port,proto3" json:"expose_public_port,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -2322,6 +2323,13 @@ func (x *Proxy) GetEffectiveStatusMessage() string {
 		return x.EffectiveStatusMessage
 	}
 	return ""
+}
+
+func (x *Proxy) GetExposePublicPort() bool {
+	if x != nil {
+		return x.ExposePublicPort
+	}
+	return false
 }
 
 type Proxies struct {
@@ -2499,13 +2507,14 @@ func (x *ListProxiesResponse) GetData() *Proxies {
 
 // 创建代理请求
 type CreateProxyRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ApplicationId uint64                 `protobuf:"varint,1,opt,name=application_id,proto3" json:"application_id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Port          int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
-	Description   string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ApplicationId    uint64                 `protobuf:"varint,1,opt,name=application_id,proto3" json:"application_id,omitempty"`
+	Name             string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Port             int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
+	Description      string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
+	ExposePublicPort bool                   `protobuf:"varint,5,opt,name=expose_public_port,proto3" json:"expose_public_port,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *CreateProxyRequest) Reset() {
@@ -2564,6 +2573,13 @@ func (x *CreateProxyRequest) GetDescription() string {
 		return x.Description
 	}
 	return ""
+}
+
+func (x *CreateProxyRequest) GetExposePublicPort() bool {
+	if x != nil {
+		return x.ExposePublicPort
+	}
+	return false
 }
 
 type CreateProxyResponse struct {
@@ -2628,14 +2644,15 @@ func (x *CreateProxyResponse) GetData() *Proxy {
 
 // 更新代理请求
 type UpdateProxyRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Port          int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
-	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
-	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name             string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Port             int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
+	Status           string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	Description      string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	ExposePublicPort *bool                  `protobuf:"varint,6,opt,name=expose_public_port,proto3,oneof" json:"expose_public_port,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *UpdateProxyRequest) Reset() {
@@ -2701,6 +2718,13 @@ func (x *UpdateProxyRequest) GetDescription() string {
 		return x.Description
 	}
 	return ""
+}
+
+func (x *UpdateProxyRequest) GetExposePublicPort() bool {
+	if x != nil && x.ExposePublicPort != nil {
+		return *x.ExposePublicPort
+	}
+	return false
 }
 
 type UpdateProxyResponse struct {
@@ -4254,7 +4278,7 @@ const file_liaison_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\"I\n" +
 	"\x19DeleteApplicationResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xf1\x02\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xa1\x03\n" +
 	"\x05Proxy\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -4273,7 +4297,8 @@ const file_liaison_proto_rawDesc = "" +
 	"access_url\x12*\n" +
 	"\x10effective_status\x18\n" +
 	" \x01(\tR\x10effective_status\x12:\n" +
-	"\x18effective_status_message\x18\v \x01(\tR\x18effective_status_message\"A\n" +
+	"\x18effective_status_message\x18\v \x01(\tR\x18effective_status_message\x12.\n" +
+	"\x12expose_public_port\x18\f \x01(\bR\x12expose_public_port\"A\n" +
 	"\aProxies\x12\x14\n" +
 	"\x05total\x18\x01 \x01(\x05R\x05total\x12 \n" +
 	"\aproxies\x18\x02 \x03(\v2\x06.ProxyR\aproxies\"Z\n" +
@@ -4284,22 +4309,25 @@ const file_liaison_proto_rawDesc = "" +
 	"\x13ListProxiesResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
-	"\x04data\x18\x03 \x01(\v2\b.ProxiesR\x04data\"\x86\x01\n" +
+	"\x04data\x18\x03 \x01(\v2\b.ProxiesR\x04data\"\xb6\x01\n" +
 	"\x12CreateProxyRequest\x12&\n" +
 	"\x0eapplication_id\x18\x01 \x01(\x04R\x0eapplication_id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x12 \n" +
-	"\vdescription\x18\x04 \x01(\tR\vdescription\"_\n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12.\n" +
+	"\x12expose_public_port\x18\x05 \x01(\bR\x12expose_public_port\"_\n" +
 	"\x13CreateProxyResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1a\n" +
-	"\x04data\x18\x03 \x01(\v2\x06.ProxyR\x04data\"\x86\x01\n" +
+	"\x04data\x18\x03 \x01(\v2\x06.ProxyR\x04data\"\xd2\x01\n" +
 	"\x12UpdateProxyRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x12\x16\n" +
 	"\x06status\x18\x04 \x01(\tR\x06status\x12 \n" +
-	"\vdescription\x18\x05 \x01(\tR\vdescription\"_\n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\x123\n" +
+	"\x12expose_public_port\x18\x06 \x01(\bH\x00R\x12expose_public_port\x88\x01\x01B\x15\n" +
+	"\x13_expose_public_port\"_\n" +
 	"\x13UpdateProxyResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1a\n" +
@@ -4600,6 +4628,7 @@ func file_liaison_proto_init() {
 	}
 	file_liaison_proto_msgTypes[26].OneofWrappers = []any{}
 	file_liaison_proto_msgTypes[28].OneofWrappers = []any{}
+	file_liaison_proto_msgTypes[40].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

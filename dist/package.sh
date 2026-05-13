@@ -27,6 +27,27 @@ PACK_DIR="liaison-${VERSION}-linux-amd64"
 
 echo -e "${GREEN}Packaging Liaison ${VERSION}...${NC}"
 
+check_linux_amd64_binary() {
+    local path="$1"
+    local name="$2"
+
+    if ! command -v file >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local desc
+    desc="$(file "$path" 2>/dev/null || true)"
+    case "$desc" in
+        *"ELF 64-bit"*x86-64*|*"ELF 64-bit"*x86_64*)
+            return 0
+            ;;
+    esac
+
+    echo -e "${RED}Error: $name must be a Linux amd64 ELF binary, got: $desc${NC}"
+    echo -e "${RED}Please run 'make build-linux build-tools-linux' before packaging.${NC}"
+    exit 1
+}
+
 # Check required files
 if [ ! -f "bin/liaison" ]; then
     echo -e "${RED}Error: bin/liaison not found. Please run 'make build-linux' first.${NC}"
@@ -35,6 +56,25 @@ fi
 
 if [ ! -f "bin/liaison-edge" ]; then
     echo -e "${RED}Error: bin/liaison-edge not found. Please run 'make build-linux' first.${NC}"
+    exit 1
+fi
+
+check_linux_amd64_binary "bin/liaison" "bin/liaison"
+check_linux_amd64_binary "bin/liaison-edge" "bin/liaison-edge"
+if [ -f "bin/frontier" ]; then
+    check_linux_amd64_binary "bin/frontier" "bin/frontier"
+fi
+if [ -f "bin/password-generator" ]; then
+    check_linux_amd64_binary "bin/password-generator" "bin/password-generator"
+fi
+
+if [ ! -f "bin/guacd" ]; then
+    echo -e "${RED}Error: bin/guacd not found. Please run 'make prepare-guacd-linux' first.${NC}"
+    exit 1
+fi
+
+if [ ! -f "bin/guacd-rootfs/opt/guacamole/sbin/guacd" ] || [ ! -f "bin/guacd-rootfs/lib/ld-musl-x86_64.so.1" ]; then
+    echo -e "${RED}Error: bundled guacd runtime not found. Please run 'make prepare-guacd-linux' first.${NC}"
     exit 1
 fi
 
@@ -75,6 +115,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
         cp -X bin/password-generator "$PACK_DIR/bin/" 2>/dev/null || cp bin/password-generator "$PACK_DIR/bin/"
         echo -e "${GREEN}  - password-generator${NC}"
     fi
+    cp -X bin/guacd "$PACK_DIR/bin/" 2>/dev/null || cp bin/guacd "$PACK_DIR/bin/"
+    echo -e "${GREEN}  - guacd${NC}"
 else
     cp bin/liaison "$PACK_DIR/bin/"
     cp bin/liaison-edge "$PACK_DIR/bin/"
@@ -88,9 +130,18 @@ else
         cp bin/password-generator "$PACK_DIR/bin/"
         echo -e "${GREEN}  - password-generator${NC}"
     fi
+    cp bin/guacd "$PACK_DIR/bin/"
+    echo -e "${GREEN}  - guacd${NC}"
 fi
 # Remove any macOS resource fork files that might have been copied
 find "$PACK_DIR/bin" -name "._*" -delete 2>/dev/null || true
+
+# Copy bundled guacd runtime. The bin/guacd wrapper uses this rootfs on Linux
+# so the installer does not depend on distro-specific guacd packages.
+echo -e "${YELLOW}Copying guacd runtime...${NC}"
+cp -a bin/guacd-rootfs "$PACK_DIR/"
+find "$PACK_DIR/guacd-rootfs" -name "._*" -delete 2>/dev/null || true
+echo -e "${GREEN}  - guacd-rootfs${NC}"
 
 # Copy edge packages (tar.gz files) for all platforms
 echo -e "${YELLOW}Copying edge packages for all platforms...${NC}"

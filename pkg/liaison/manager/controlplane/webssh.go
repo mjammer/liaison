@@ -12,6 +12,7 @@ import (
 
 	"github.com/liaisonio/liaison/pkg/liaison/repo/model"
 	"github.com/liaisonio/liaison/pkg/proto"
+	"github.com/liaisonio/liaison/pkg/trafficconn"
 	"gorm.io/gorm"
 )
 
@@ -80,6 +81,7 @@ func (cp *controlPlane) OpenWebSSHStream(ctx context.Context, proxyID uint) (net
 	if err != nil {
 		return nil, target, fmt.Errorf("连接器通道打开失败: %w", err)
 	}
+	meteredStream := trafficconn.TargetConn(stream, cp.trafficRecorder, target.ProxyID, target.ApplicationID)
 	dst := proto.Dst{
 		Addr:          net.JoinHostPort(target.TargetHost, fmt.Sprintf("%d", target.TargetPort)),
 		ApplicationID: target.ApplicationID,
@@ -87,20 +89,20 @@ func (cp *controlPlane) OpenWebSSHStream(ctx context.Context, proxyID uint) (net
 	}
 	data, err := json.Marshal(dst)
 	if err != nil {
-		_ = stream.Close()
+		_ = meteredStream.Close()
 		return nil, target, err
 	}
 	lengthBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(lengthBuf, uint32(len(data)))
-	if _, err := stream.Write(lengthBuf); err != nil {
-		_ = stream.Close()
+	if _, err := meteredStream.Write(lengthBuf); err != nil {
+		_ = meteredStream.Close()
 		return nil, target, err
 	}
-	if _, err := stream.Write(data); err != nil {
-		_ = stream.Close()
+	if _, err := meteredStream.Write(data); err != nil {
+		_ = meteredStream.Close()
 		return nil, target, err
 	}
-	return stream, target, nil
+	return meteredStream, target, nil
 }
 
 func (cp *controlPlane) TrustWebSSHHostKey(_ context.Context, proxyID uint, algorithm, fingerprintSHA256, publicKey string) error {

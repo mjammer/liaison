@@ -72,9 +72,7 @@ func (d *dao) UpdateProxy(proxy *model.Proxy) error {
 	if proxy.Description != "" {
 		updates["description"] = proxy.Description
 	}
-	if proxy.Port > 0 {
-		updates["port"] = proxy.Port
-	}
+	updates["port"] = proxy.Port
 	return d.getDB().Model(&model.Proxy{}).Where("id = ?", proxy.ID).Updates(updates).Error
 }
 
@@ -83,6 +81,9 @@ func (d *dao) DeleteProxy(id uint) error {
 		return err
 	}
 	if err := d.DeleteWebSSHCredentialByProxyID(id); err != nil {
+		return err
+	}
+	if err := d.DeleteWebDesktopCredentialByProxyID(id); err != nil {
 		return err
 	}
 	return d.getDB().Delete(&model.Proxy{}, id).Error

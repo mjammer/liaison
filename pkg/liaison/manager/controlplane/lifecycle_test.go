@@ -456,6 +456,120 @@ func TestRestoreProxyListenersPersistsAutoAllocatedPort(t *testing.T) {
 	}
 }
 
+func TestCreateWebOnlyProxySkipsRuntimeListener(t *testing.T) {
+	cases := []struct {
+		name    string
+		appType model.ApplicationType
+		port    int
+	}{
+		{name: "ssh", appType: model.ApplicationTypeSSH, port: 22},
+		{name: "rdp", appType: model.ApplicationTypeRDP, port: 3389},
+		{name: "vnc", appType: model.ApplicationTypeVNC, port: 5900},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cp, r := newTestControlPlane(t)
+			defer r.Close()
+			pm := newFakeProxyManager()
+			cp.RegisterProxyManager(pm)
+
+			_, application := createTestEdgeApplication(t, r)
+			application.ApplicationType = tc.appType
+			application.Port = tc.port
+			if err := r.UpdateApplication(application); err != nil {
+				t.Fatalf("update application: %v", err)
+			}
+
+			created, err := cp.CreateProxy(context.Background(), &v1.CreateProxyRequest{
+				ApplicationId: uint64(application.ID),
+				Name:          "web-only-" + tc.name,
+			})
+			if err != nil {
+				t.Fatalf("create proxy: %v", err)
+			}
+			if created.Data.Port != 0 {
+				t.Fatalf("created proxy port = %d, want 0 for web-only", created.Data.Port)
+			}
+			if created.Data.AccessUrl != "" {
+				t.Fatalf("created proxy access_url = %q, want empty for web-only", created.Data.AccessUrl)
+			}
+			if created.Data.EffectiveStatus != proxyEffectiveStatusActive {
+				t.Fatalf("effective status = %q, want active", created.Data.EffectiveStatus)
+			}
+			if len(pm.created) != 0 {
+				t.Fatalf("runtime listener should not be created for web-only %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestWebProxyPublicPortSwitchControlsRuntimeListener(t *testing.T) {
+	cp, r := newTestControlPlane(t)
+	defer r.Close()
+	pm := newFakeProxyManager()
+	cp.RegisterProxyManager(pm)
+
+	_, application := createTestEdgeApplication(t, r)
+	application.ApplicationType = model.ApplicationTypeSSH
+	application.Port = 22
+	if err := r.UpdateApplication(application); err != nil {
+		t.Fatalf("update application: %v", err)
+	}
+
+	created, err := cp.CreateProxy(context.Background(), &v1.CreateProxyRequest{
+		ApplicationId:    uint64(application.ID),
+		Name:             "ssh-public",
+		ExposePublicPort: true,
+	})
+	if err != nil {
+		t.Fatalf("create proxy: %v", err)
+	}
+	if created.Data.Port == 0 || !created.Data.ExposePublicPort {
+		t.Fatalf("created proxy public port = %d expose=%v, want exposed port", created.Data.Port, created.Data.ExposePublicPort)
+	}
+	if len(pm.created) != 1 {
+		t.Fatalf("runtime listener should be created when public port is enabled")
+	}
+
+	expose := false
+	updated, err := cp.UpdateProxy(context.Background(), &v1.UpdateProxyRequest{
+		Id:               created.Data.Id,
+		ExposePublicPort: &expose,
+	})
+	if err != nil {
+		t.Fatalf("disable public port: %v", err)
+	}
+	if updated.Data.Port != 0 || updated.Data.ExposePublicPort {
+		t.Fatalf("updated proxy port = %d expose=%v, want web-only", updated.Data.Port, updated.Data.ExposePublicPort)
+	}
+	if len(pm.created) != 0 {
+		t.Fatalf("runtime listener should be removed when public port is disabled")
+	}
+	persisted, err := r.GetProxyByID(uint(created.Data.Id))
+	if err != nil {
+		t.Fatalf("get proxy: %v", err)
+	}
+	if persisted.Port != 0 {
+		t.Fatalf("persisted proxy port = %d, want 0", persisted.Port)
+	}
+
+	expose = true
+	updated, err = cp.UpdateProxy(context.Background(), &v1.UpdateProxyRequest{
+		Id:               created.Data.Id,
+		ExposePublicPort: &expose,
+	})
+	if err != nil {
+		t.Fatalf("enable public port: %v", err)
+	}
+	if updated.Data.Port == 0 || !updated.Data.ExposePublicPort {
+		t.Fatalf("updated proxy public port = %d expose=%v, want exposed port", updated.Data.Port, updated.Data.ExposePublicPort)
+	}
+	if len(pm.created) != 1 {
+		t.Fatalf("runtime listener should be recreated when public port is enabled")
+	}
+}
+
 func TestRestoreProxyListenersRejectsAutoPortConflict(t *testing.T) {
 	cp, r := newTestControlPlane(t)
 	defer r.Close()

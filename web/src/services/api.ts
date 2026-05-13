@@ -240,6 +240,41 @@ export async function deleteWebSSHCredential(id: number, username?: string) {
   });
 }
 
+/** 获取 WebDesktop 目标信息 GET /v1/webdesktop/proxies/:id */
+export async function getWebDesktopTarget(id: number) {
+  return request<API.Response<API.WebDesktopTarget>>(
+    `/api/v1/webdesktop/proxies/${id}`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+/** 创建 WebDesktop 会话 POST /v1/webdesktop/proxies/:id/session */
+export async function createWebDesktopSession(
+  id: number,
+  data: API.CreateWebDesktopSessionRequest,
+) {
+  return request<API.Response<API.CreateWebDesktopSessionResponse>>(
+    `/api/v1/webdesktop/proxies/${id}/session`,
+    {
+      method: 'POST',
+      data,
+    },
+  );
+}
+
+/** 清除 WebDesktop 保存凭据 DELETE /v1/webdesktop/proxies/:id/credential */
+export async function deleteWebDesktopCredential(
+  id: number,
+  params: API.DeleteWebDesktopCredentialParams,
+) {
+  return request<API.Response>(`/api/v1/webdesktop/proxies/${id}/credential`, {
+    method: 'DELETE',
+    params,
+  });
+}
+
 /** 获取流量监控列表 GET /v1/traffic-metrics */
 export async function getTrafficMetricsList(params?: API.TrafficMetricsListParams) {
   return request<API.Response<API.TrafficMetricsListResult>>('/api/v1/traffic-metrics', {

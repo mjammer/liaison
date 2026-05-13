@@ -21,6 +21,14 @@ log()  { printf "${GREEN}%s${NC}\n" "$*"; }
 warn() { printf "${YELLOW}%s${NC}\n" "$*"; }
 err()  { printf "${RED}%s${NC}\n" "$*" >&2; }
 
+canonical_url() {
+    case "${MANAGER_PORT:-443}" in
+        443) printf "https://%s" "${LIAISON_PUBLIC_HOST:-localhost}" ;;
+        80)  printf "http://%s" "${LIAISON_PUBLIC_HOST:-localhost}" ;;
+        *)   printf "https://%s:%s" "${LIAISON_PUBLIC_HOST:-localhost}" "${MANAGER_PORT:-443}" ;;
+    esac
+}
+
 # ---------------------------------------------------------------------------
 # 1. Environment checks
 # ---------------------------------------------------------------------------
@@ -82,7 +90,7 @@ else
 
     DEFAULT_HOST="${DETECTED_IP:-localhost}"
     printf "\n${BOLD}Enter public IP or domain${NC} [${CYAN}%s${NC}] (auto-accept in 30s): " "$DEFAULT_HOST"
-    if read -r -t 30 INPUT_HOST </dev/tty; then
+    if [ -r /dev/tty ] && read -r -t 30 INPUT_HOST </dev/tty; then
         PUBLIC_HOST="${INPUT_HOST:-$DEFAULT_HOST}"
     else
         echo
@@ -101,6 +109,7 @@ fi
 set -a; . ./.env; set +a
 : "${LIAISON_PUBLIC_HOST:=localhost}"
 : "${MANAGER_PORT:=443}"
+ACCESS_URL=$(canonical_url)
 
 # ---------------------------------------------------------------------------
 # 4. Pre-create bind-mount dirs with correct ownership (uid 1000 inside)
@@ -109,6 +118,11 @@ mkdir -p data certs logs
 # Best-effort: needs root on Linux. Silently ignore if we lack capability
 # (Docker Desktop on macOS/Windows auto-maps UIDs anyway).
 chown 1000:1000 data certs logs 2>/dev/null || true
+
+FRESH_INSTALL=0
+if [ ! -f data/.initialized ]; then
+    FRESH_INSTALL=1
+fi
 
 # ---------------------------------------------------------------------------
 # 5. Launch
@@ -123,11 +137,11 @@ $DC up -d
 #    just tell the operator to use their existing credentials.
 # ---------------------------------------------------------------------------
 echo
-if [ -f data/.initialized ]; then
+if [ "$FRESH_INSTALL" -eq 0 ]; then
     cat <<EOF
 ${BOLD}${GREEN}============================================================${NC}
   Liaison is up (reusing existing data).
-  URL:      ${CYAN}https://${LIAISON_PUBLIC_HOST}:${MANAGER_PORT}${NC}
+  URL:      ${CYAN}${ACCESS_URL}${NC}
   Login:    use your existing admin credentials.
 ${BOLD}${GREEN}============================================================${NC}
 
@@ -156,7 +170,7 @@ if [ -n "$PASSWORD" ]; then
     cat <<EOF
 ${BOLD}${GREEN}============================================================${NC}
   Liaison is up.
-  URL:      ${CYAN}https://${LIAISON_PUBLIC_HOST}:${MANAGER_PORT}${NC}
+  URL:      ${CYAN}${ACCESS_URL}${NC}
   Email:    ${LIAISON_ADMIN_EMAIL:-default@liaison.com}
   Password: ${CYAN}${PASSWORD}${NC}
 ${BOLD}${GREEN}============================================================${NC}

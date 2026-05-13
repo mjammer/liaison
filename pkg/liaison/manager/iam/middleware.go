@@ -117,6 +117,9 @@ func isIAMEndpoint(path string) bool {
 	if strings.HasPrefix(path, "/api/v1/webssh/sessions/") && strings.HasSuffix(path, "/connect") {
 		return true
 	}
+	if strings.HasPrefix(path, "/api/v1/webdesktop/sessions/") && strings.HasSuffix(path, "/connect") {
+		return true
+	}
 
 	for _, noAuthPath := range noAuthPaths {
 		if path == noAuthPath {

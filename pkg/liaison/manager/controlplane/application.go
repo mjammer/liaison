@@ -17,6 +17,7 @@ func getDefaultPortByApplicationType(appType string) int {
 		"http":       80,
 		"ssh":        22,
 		"rdp":        3389,
+		"vnc":        5900,
 		"mysql":      3306,
 		"postgresql": 5432,
 		"redis":      6379,
@@ -36,6 +37,7 @@ func detectApplicationTypeByPort(port int) string {
 		80:    "http",
 		443:   "http",
 		3389:  "rdp",
+		5900:  "vnc",
 		3306:  "mysql",
 		5432:  "postgresql",
 		6379:  "redis",
@@ -362,7 +364,7 @@ func (cp *controlPlane) DeleteApplication(_ context.Context, req *v1.DeleteAppli
 
 func isAllowedApplicationType(appType string) bool {
 	switch appType {
-	case "http", "tcp", "ssh", "rdp", "mysql", "postgresql", "redis", "mongodb", "database":
+	case "http", "tcp", "ssh", "rdp", "vnc", "mysql", "postgresql", "redis", "mongodb", "database":
 		return true
 	default:
 		return false

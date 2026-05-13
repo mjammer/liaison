@@ -21,6 +21,22 @@ const (
 	proxyEffectiveStatusInvalid     = "invalid"
 )
 
+func isWebOnlyCapableApplicationType(appType model.ApplicationType) bool {
+	switch appType {
+	case model.ApplicationTypeSSH, model.ApplicationTypeRDP, model.ApplicationTypeVNC:
+		return true
+	default:
+		return false
+	}
+}
+
+func isWebOnlyProxy(proxy *model.Proxy, application *model.Application) bool {
+	return proxy != nil &&
+		application != nil &&
+		proxy.Port == 0 &&
+		isWebOnlyCapableApplicationType(application.ApplicationType)
+}
+
 // stopProxyRuntime stops the data-plane listener for proxy and revokes any
 // associated firewall rule from the in-memory kernel. Safe to call on an
 // already-stopped proxy or when no proxyManager is registered.
@@ -241,6 +257,9 @@ func (cp *controlPlane) proxyRuntimeEligible(proxy *model.Proxy, application *mo
 	}
 	if len(application.EdgeIDs) == 0 {
 		return false, conflict("APPLICATION_EDGE_MISSING", "关联应用未绑定连接器")
+	}
+	if isWebOnlyProxy(proxy, application) {
+		return false, nil
 	}
 	edge, err := cp.repo.GetEdge(uint64(application.EdgeIDs[0]))
 	if err != nil {

@@ -132,19 +132,15 @@ func (cp *controlPlane) ListTrafficMetrics(_ context.Context, req *v1.ListTraffi
 	// 转换为 proto 格式
 	metricsV1 := make([]*v1.TrafficMetric, 0, len(aggregated))
 	for _, agg := range aggregated {
-		// 计算平均值
-		avgBytesIn := agg.BytesIn / int64(agg.Count)
-		avgBytesOut := agg.BytesOut / int64(agg.Count)
-
 		// 将 int64 转换为 int32，确保 JSON 序列化为数字而不是字符串
 		// 注意：如果值超过 int32 最大值（2GB），会被截断
-		bytesIn := int32(avgBytesIn)
-		bytesOut := int32(avgBytesOut)
+		bytesIn := int32(agg.BytesIn)
+		bytesOut := int32(agg.BytesOut)
 		// 如果值超过 int32 最大值，设置为最大值
-		if avgBytesIn > 2147483647 {
+		if agg.BytesIn > 2147483647 {
 			bytesIn = 2147483647
 		}
-		if avgBytesOut > 2147483647 {
+		if agg.BytesOut > 2147483647 {
 			bytesOut = 2147483647
 		}
 

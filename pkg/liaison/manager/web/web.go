@@ -35,10 +35,14 @@ type web struct {
 	app *kratos.App
 
 	// deps
-	controlPlane  controlplane.ControlPlane
-	iamService    *iam.IAMService
-	webSSH        *webSSHSessionStore
-	credentialKey []byte
+	controlPlane    controlplane.ControlPlane
+	iamService      *iam.IAMService
+	webSSH          *webSSHSessionStore
+	webDesktop      *webDesktopSessionStore
+	credentialKey   []byte
+	guacdAddr       string
+	guacdBridgeAddr string
+	guacdBridgeHost string
 }
 
 func NewWebServer(conf *config.Configuration, controlPlane controlplane.ControlPlane, iamService *iam.IAMService) (Web, error) {
@@ -64,10 +68,14 @@ func NewWebServerWithListener(conf *config.Configuration, controlPlane controlpl
 	}
 	credentialKey := deriveWebSSHCredentialKey(conf)
 	web := &web{
-		controlPlane:  controlPlane,
-		iamService:    iamService,
-		webSSH:        newWebSSHSessionStore(),
-		credentialKey: credentialKey,
+		controlPlane:    controlPlane,
+		iamService:      iamService,
+		webSSH:          newWebSSHSessionStore(),
+		webDesktop:      newWebDesktopSessionStore(),
+		credentialKey:   credentialKey,
+		guacdAddr:       managerGuacdAddr(conf),
+		guacdBridgeAddr: managerGuacdBridgeAddr(conf),
+		guacdBridgeHost: managerGuacdBridgeHost(conf),
 	}
 	// 创建认证中间件
 	authMiddleware := iam.AuthMiddleware(web.iamService)
@@ -96,6 +104,12 @@ func NewWebServerWithListener(conf *config.Configuration, controlPlane controlpl
 	srv.HandleFunc("/api/v1/webssh/proxies/{id}/credential", web.handleWebSSHCredentialHTTP)
 	srv.HandleFunc("/api/v1/webssh/proxies/{id}/host-key", web.handleWebSSHHostKeyHTTP)
 	srv.HandleFunc("/api/v1/webssh/sessions/{token}/connect", web.handleWebSSHConnectHTTP)
+
+	// WebDesktop (RDP/VNC)
+	srv.HandleFunc("/api/v1/webdesktop/proxies/{id}", web.handleWebDesktopTargetHTTP)
+	srv.HandleFunc("/api/v1/webdesktop/proxies/{id}/session", web.handleCreateWebDesktopSessionHTTP)
+	srv.HandleFunc("/api/v1/webdesktop/proxies/{id}/credential", web.handleWebDesktopCredentialHTTP)
+	srv.HandleFunc("/api/v1/webdesktop/sessions/{token}/connect", web.handleWebDesktopConnectHTTP)
 
 	// 文件服务
 	if err := web.serveFiles(conf, srv); err != nil {
@@ -188,6 +202,7 @@ func (web *web) serveFiles(conf *config.Configuration, srv *kratoshttp.Server) e
 			path != "/uninstall.sh" &&
 			path != "/uninstall.ps1" &&
 			!strings.HasPrefix(path, "/packages/") {
+			setWebStaticNoCache(w)
 			// 检查文件是否存在
 
 			filePath := filepath.Join(webDirAbs, path)
@@ -203,6 +218,12 @@ func (web *web) serveFiles(conf *config.Configuration, srv *kratoshttp.Server) e
 		// 其他路径由其他处理器处理，这里不做处理
 	}))
 	return nil
+}
+
+func setWebStaticNoCache(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 }
 
 func (web *web) Serve() error {
@@ -230,4 +251,25 @@ func deriveWebSSHCredentialKey(conf *config.Configuration) []byte {
 	}
 	sum := sha256.Sum256([]byte("liaison-webssh-credential:" + secret))
 	return sum[:]
+}
+
+func managerGuacdAddr(conf *config.Configuration) string {
+	if conf == nil || strings.TrimSpace(conf.Manager.GuacdAddr) == "" {
+		return "127.0.0.1:4822"
+	}
+	return strings.TrimSpace(conf.Manager.GuacdAddr)
+}
+
+func managerGuacdBridgeAddr(conf *config.Configuration) string {
+	if conf == nil || strings.TrimSpace(conf.Manager.GuacdBridgeAddr) == "" {
+		return "127.0.0.1:0"
+	}
+	return strings.TrimSpace(conf.Manager.GuacdBridgeAddr)
+}
+
+func managerGuacdBridgeHost(conf *config.Configuration) string {
+	if conf == nil {
+		return ""
+	}
+	return strings.TrimSpace(conf.Manager.GuacdBridgeHost)
 }

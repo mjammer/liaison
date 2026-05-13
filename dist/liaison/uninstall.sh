@@ -16,6 +16,8 @@ NC='\033[0m' # No Color
 SERVICE_NAME="liaison"
 SERVICE_USER="liaison"
 INSTALL_DIR="/opt/liaison"
+GUACD_SERVICE_NAME="liaison-guacd"
+GUACD_CONTAINER_NAME="liaison-guacd"
 
 echo -e "${GREEN}Uninstalling Liaison Service...${NC}"
 
@@ -56,6 +58,26 @@ if systemctl is-enabled --quiet frontier 2>/dev/null; then
     echo -e "${GREEN}frontier service disabled${NC}"
 else
     echo -e "${YELLOW}frontier service is not enabled${NC}"
+fi
+
+# Stop and disable Liaison-managed guacd service. This does not uninstall a
+# system package named guacd; it only removes the service created by Liaison.
+if systemctl is-active --quiet "$GUACD_SERVICE_NAME" 2>/dev/null; then
+    systemctl stop "$GUACD_SERVICE_NAME"
+    echo -e "${GREEN}${GUACD_SERVICE_NAME} service stopped${NC}"
+else
+    echo -e "${YELLOW}${GUACD_SERVICE_NAME} service is not running${NC}"
+fi
+
+if systemctl is-enabled --quiet "$GUACD_SERVICE_NAME" 2>/dev/null; then
+    systemctl disable "$GUACD_SERVICE_NAME"
+    echo -e "${GREEN}${GUACD_SERVICE_NAME} service disabled${NC}"
+else
+    echo -e "${YELLOW}${GUACD_SERVICE_NAME} service is not enabled${NC}"
+fi
+
+if command -v docker >/dev/null 2>&1; then
+    docker rm -f "$GUACD_CONTAINER_NAME" >/dev/null 2>&1 || true
 fi
 
 # Force kill any remaining processes
@@ -110,6 +132,13 @@ if [[ -f "/etc/systemd/system/frontier.service" ]]; then
     echo -e "${GREEN}frontier.service removed${NC}"
 else
     echo -e "${YELLOW}frontier.service not found${NC}"
+fi
+
+if [[ -f "/etc/systemd/system/${GUACD_SERVICE_NAME}.service" ]]; then
+    rm "/etc/systemd/system/${GUACD_SERVICE_NAME}.service"
+    echo -e "${GREEN}${GUACD_SERVICE_NAME}.service removed${NC}"
+else
+    echo -e "${YELLOW}${GUACD_SERVICE_NAME}.service not found${NC}"
 fi
 
 # Reload systemd
