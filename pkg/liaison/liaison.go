@@ -93,7 +93,7 @@ func NewLiaison() (*Liaison, error) {
 		}
 	}()
 	// service layer
-	controlPlane, err := controlplane.NewControlPlane(config.Conf, repo, frontierBound)
+	controlPlane, err := controlplane.NewControlPlane(config.Conf, repo, frontierBound, trafficCollector)
 	if err != nil {
 		return nil, err
 	}

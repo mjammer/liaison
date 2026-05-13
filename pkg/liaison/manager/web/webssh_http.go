@@ -31,6 +31,10 @@ const (
 	webSSHDefaultRows    = 32
 	webSSHMaxMessageSize = 128 * 1024
 	webSSHHeartbeatTTL   = 75 * time.Second
+	webSSHWSBufferSize   = 32 * 1024
+	webSSHOutputReadSize = 32 * 1024
+	webSSHOutputBatchMax = 64 * 1024
+	webSSHOutputFlush    = 4 * time.Millisecond
 )
 
 type createWebSSHSessionRequest struct {
@@ -345,7 +349,9 @@ func (web *web) handleWebSSHConnectHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	defer session.zero()
 	upgrader := websocket.Upgrader{
-		CheckOrigin: web.checkWebSSHOrigin,
+		ReadBufferSize:  webSSHWSBufferSize,
+		WriteBufferSize: webSSHWSBufferSize,
+		CheckOrigin:     web.checkWebSSHOrigin,
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -515,21 +521,95 @@ func refreshWebSSHReadDeadline(conn *websocket.Conn) {
 }
 
 func (web *web) copyWebSSHOutput(writer *webSSHWSWriter, reader io.Reader, done <-chan struct{}) {
-	buf := make([]byte, 8192)
-	for {
-		select {
-		case <-done:
-			return
-		default:
-		}
-		n, err := reader.Read(buf)
-		if n > 0 {
-			if writeErr := writer.write(webSSHServerMessage{Type: "output", Data: string(buf[:n])}); writeErr != nil {
+	chunks := make(chan []byte, 16)
+	quit := make(chan struct{})
+	go func() {
+		defer close(chunks)
+		buf := make([]byte, webSSHOutputReadSize)
+		for {
+			select {
+			case <-done:
+				return
+			case <-quit:
+				return
+			default:
+			}
+			n, err := reader.Read(buf)
+			if n > 0 {
+				chunk := append([]byte(nil), buf[:n]...)
+				select {
+				case chunks <- chunk:
+				case <-done:
+					return
+				case <-quit:
+					return
+				}
+			}
+			if err != nil {
 				return
 			}
 		}
-		if err != nil {
+	}()
+
+	pending := make([]byte, 0, webSSHOutputReadSize)
+	var flushTimer *time.Timer
+	var flushTimerC <-chan time.Time
+	stopFlushTimer := func() {
+		if flushTimer == nil {
 			return
+		}
+		if !flushTimer.Stop() {
+			select {
+			case <-flushTimer.C:
+			default:
+			}
+		}
+		flushTimerC = nil
+	}
+	startFlushTimer := func() {
+		if flushTimer == nil {
+			flushTimer = time.NewTimer(webSSHOutputFlush)
+		} else {
+			flushTimer.Reset(webSSHOutputFlush)
+		}
+		flushTimerC = flushTimer.C
+	}
+	flush := func() bool {
+		stopFlushTimer()
+		if len(pending) == 0 {
+			return true
+		}
+		data := string(pending)
+		pending = pending[:0]
+		return writer.write(webSSHServerMessage{Type: "output", Data: data}) == nil
+	}
+
+	defer func() {
+		close(quit)
+		stopFlushTimer()
+	}()
+	for {
+		select {
+		case <-done:
+			flush()
+			return
+		case chunk, ok := <-chunks:
+			if !ok {
+				flush()
+				return
+			}
+			pending = append(pending, chunk...)
+			if len(pending) >= webSSHOutputBatchMax {
+				if !flush() {
+					return
+				}
+			} else if flushTimerC == nil {
+				startFlushTimer()
+			}
+		case <-flushTimerC:
+			if !flush() {
+				return
+			}
 		}
 	}
 }

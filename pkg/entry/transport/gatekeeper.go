@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jumboframes/armorigo/log"
@@ -16,6 +15,7 @@ import (
 	"github.com/liaisonio/liaison/pkg/entry/frontierbound"
 	"github.com/liaisonio/liaison/pkg/lerrors"
 	"github.com/liaisonio/liaison/pkg/proto"
+	"github.com/liaisonio/liaison/pkg/trafficconn"
 )
 
 // firewallChecker mirrors the minimal contract used by the TCP data plane.
@@ -140,8 +140,12 @@ func (m *Gatekeeper) CreateProxy(ctx context.Context, protoproxy *proto.Proxy) e
 		if err != nil {
 			return nil, err
 		}
-		// 包装stream连接以统计流量
-		return newCountingConn(stream, pc), nil
+		return trafficconn.TargetConn(
+			stream,
+			trafficconn.RecorderFunc(pc.gatekeeper.recordTraffic),
+			pc.proxyID,
+			pc.applicationID,
+		), nil
 	}
 	preWrite := func(writer io.Writer, custom interface{}) error {
 		pc := custom.(*proxyContext)
@@ -279,13 +283,8 @@ type proxyContext struct {
 	dst           string
 	applicationID uint
 	proxyID       uint
-	// 流量统计
-	bytesIn  int64 // 入站流量（从客户端到服务器）
-	bytesOut int64 // 出站流量（从服务器到客户端）
 	// 用于记录流量到collector
 	gatekeeper *Gatekeeper
-	// 连接关闭标记
-	closed int32
 }
 
 type proxy struct {
@@ -366,46 +365,4 @@ func (m *Gatekeeper) flushAndReport() {
 		}
 		log.Debugf("reported %d traffic metrics", len(statsToReport))
 	}
-}
-
-// countingConn 包装net.Conn以统计流量
-// rproxy内部会进行双向数据复制：
-// 1. 从客户端读取 -> 写入stream（入站流量，通过stream.Write统计）
-// 2. 从stream读取 -> 写入客户端（出站流量，通过stream.Read统计）
-type countingConn struct {
-	net.Conn
-	pc *proxyContext
-}
-
-func newCountingConn(conn net.Conn, pc *proxyContext) *countingConn {
-	return &countingConn{
-		Conn: conn,
-		pc:   pc,
-	}
-}
-
-func (c *countingConn) Read(b []byte) (n int, err error) {
-	n, err = c.Conn.Read(b)
-	if n > 0 {
-		// 从stream读取，是出站流量（从服务器到客户端）
-		atomic.AddInt64(&c.pc.bytesOut, int64(n))
-		// 实时累积到gatekeeper的stats中（不等待连接关闭）
-		c.pc.gatekeeper.recordTraffic(c.pc.proxyID, c.pc.applicationID, 0, int64(n))
-	}
-	return n, err
-}
-
-func (c *countingConn) Write(b []byte) (n int, err error) {
-	n, err = c.Conn.Write(b)
-	if n > 0 {
-		// 向stream写入，是入站流量（从客户端到服务器）
-		atomic.AddInt64(&c.pc.bytesIn, int64(n))
-		// 实时累积到gatekeeper的stats中（不等待连接关闭）
-		c.pc.gatekeeper.recordTraffic(c.pc.proxyID, c.pc.applicationID, int64(n), 0)
-	}
-	return n, err
-}
-
-func (c *countingConn) Close() error {
-	return c.Conn.Close()
 }

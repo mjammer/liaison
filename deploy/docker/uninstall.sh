@@ -71,7 +71,7 @@ elif [ -f .env.example ]; then
 fi
 : "${LIAISON_IMAGE_REGISTRY:=liaison}"
 : "${LIAISON_IMAGE_TAG:=latest}"
-for img in "$LIAISON_IMAGE_REGISTRY/liaison:$LIAISON_IMAGE_TAG" "$LIAISON_IMAGE_REGISTRY/frontier:$LIAISON_IMAGE_TAG"; do
+for img in "$LIAISON_IMAGE_REGISTRY/liaison:$LIAISON_IMAGE_TAG" "$LIAISON_IMAGE_REGISTRY/frontier:$LIAISON_IMAGE_TAG" "guacamole/guacd:1.5.5"; do
     if docker image inspect "$img" >/dev/null 2>&1; then
         docker rmi "$img" 2>&1 | sed 's/^/  /' || true
     fi

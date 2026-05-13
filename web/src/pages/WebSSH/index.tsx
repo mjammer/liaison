@@ -7,6 +7,8 @@ import {
 } from '@/services/api';
 import {
   DisconnectOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
   SendOutlined,
@@ -23,27 +25,26 @@ import {
   Checkbox,
   Form,
   Input,
+  message,
   Popconfirm,
   Space,
   Spin,
   Tag,
   Typography,
-  message,
 } from 'antd';
-import {
-  ClipboardEvent,
-  FormEvent,
-  KeyboardEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import './index.less';
 
 const { Text } = Typography;
 const webSSHHeartbeatIntervalMs = 25_000;
 const webSSHHeartbeatTimeoutMs = 75_000;
+const webSSHOutputFlushDelayMs = 8;
+
+const isTerminalAtBottom = (terminal?: Terminal) => {
+  if (!terminal) return true;
+  const buffer = terminal.buffer.active;
+  return buffer.viewportY >= buffer.baseY;
+};
 
 const WebSSHPage: React.FC = () => {
   const { tr } = useI18n();
@@ -55,16 +56,22 @@ const WebSSHPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const [error, setError] = useState('');
   const terminalFrameRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
-  const keyboardCaptureRef = useRef<HTMLTextAreaElement | null>(null);
   const terminalRef = useRef<Terminal>();
   const fitAddonRef = useRef<FitAddon>();
   const socketRef = useRef<WebSocket>();
   const heartbeatTimerRef = useRef<number>();
+  const lastResizeRef = useRef<{ cols: number; rows: number }>();
   const lastServerMessageAtRef = useRef(0);
   const pendingCredentialSaveRef = useRef(false);
+  const inputBufferRef = useRef('');
+  const inputFlushQueuedRef = useRef(false);
+  const outputBufferRef = useRef('');
+  const outputFlushTimerRef = useRef<number>();
+  const outputStickToBottomRef = useRef(true);
 
   const active = target?.effective_status === 'active';
   const savedCredentials = target?.credentials || [];
@@ -76,115 +83,133 @@ const WebSSHPage: React.FC = () => {
     label: item.username,
     value: item.username,
   }));
+  const watermarkText = target
+    ? `WebSSH · ${target.proxy_name} · ${target.application_name} · ${target.target_host}:${target.target_port}`
+    : 'WebSSH';
 
-  const sendTerminalInput = useCallback((data: string) => {
+  const flushTerminalInput = useCallback(() => {
+    inputFlushQueuedRef.current = false;
+    const data = inputBufferRef.current;
+    inputBufferRef.current = '';
     if (data && socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: 'input', data }));
     }
   }, []);
 
-  const focusTerminal = useCallback(() => {
-    terminalRef.current?.focus();
-    terminalFrameRef.current?.focus();
-    keyboardCaptureRef.current?.focus();
-    requestAnimationFrame(() => {
-      terminalRef.current?.focus();
-      terminalFrameRef.current?.focus();
-      keyboardCaptureRef.current?.focus();
+  const sendTerminalInput = useCallback(
+    (data: string) => {
+      if (!data) return;
+      inputBufferRef.current += data;
+      if (inputFlushQueuedRef.current) return;
+      inputFlushQueuedRef.current = true;
+      queueMicrotask(flushTerminalInput);
+    },
+    [flushTerminalInput],
+  );
+
+  const flushTerminalOutput = useCallback(() => {
+    if (outputFlushTimerRef.current !== undefined) {
+      window.clearTimeout(outputFlushTimerRef.current);
+      outputFlushTimerRef.current = undefined;
+    }
+    const terminal = terminalRef.current;
+    const data = outputBufferRef.current;
+    outputBufferRef.current = '';
+    if (!terminal || !data) return;
+    const stickToBottom = outputStickToBottomRef.current;
+    outputStickToBottomRef.current = true;
+    terminal.write(data, () => {
+      if (stickToBottom) {
+        terminal.scrollToBottom();
+      }
     });
   }, []);
 
-  const keyEventToTerminalInput = useCallback(
-    (event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey'>) => {
-      if (event.ctrlKey && event.key.length === 1) {
-        const code = event.key.toUpperCase().charCodeAt(0);
-        if (code >= 65 && code <= 90) {
-          return String.fromCharCode(code - 64);
-        }
-      }
+  const writeTerminalOutput = useCallback(
+    (data: string) => {
+      if (!data || !terminalRef.current) return;
+      outputStickToBottomRef.current =
+        outputStickToBottomRef.current &&
+        isTerminalAtBottom(terminalRef.current);
+      outputBufferRef.current += data;
+      if (outputFlushTimerRef.current !== undefined) return;
+      outputFlushTimerRef.current = window.setTimeout(
+        flushTerminalOutput,
+        webSSHOutputFlushDelayMs,
+      );
+    },
+    [flushTerminalOutput],
+  );
 
-      switch (event.key) {
-        case 'Enter':
-          return '\r';
-        case 'Backspace':
-          return '\x7f';
-        case 'Tab':
-          return '\t';
-        case 'Escape':
-          return '\x1b';
-        case 'ArrowUp':
-          return '\x1b[A';
-        case 'ArrowDown':
-          return '\x1b[B';
-        case 'ArrowRight':
-          return '\x1b[C';
-        case 'ArrowLeft':
-          return '\x1b[D';
-        case 'Delete':
-          return '\x1b[3~';
-        case 'Home':
-          return '\x1b[H';
-        case 'End':
-          return '\x1b[F';
-        default:
-          if (!event.metaKey && !event.altKey && event.key.length === 1) {
-            return event.key;
-          }
+  const focusTerminal = useCallback(() => {
+    if (!terminalRef.current) {
+      terminalFrameRef.current?.focus();
+      return;
+    }
+    terminalRef.current.focus();
+    requestAnimationFrame(() => {
+      terminalRef.current?.focus();
+    });
+  }, []);
+
+  const fitTerminal = useCallback(
+    (stickToBottom = isTerminalAtBottom(terminalRef.current)) => {
+      fitAddonRef.current?.fit();
+      if (stickToBottom) {
+        terminalRef.current?.scrollToBottom();
       }
-      return '';
+      const terminal = terminalRef.current;
+      if (socketRef.current?.readyState === WebSocket.OPEN && terminal) {
+        const cols = terminal.cols;
+        const rows = terminal.rows;
+        if (
+          lastResizeRef.current?.cols === cols &&
+          lastResizeRef.current?.rows === rows
+        ) {
+          return;
+        }
+        lastResizeRef.current = { cols, rows };
+        socketRef.current.send(
+          JSON.stringify({
+            type: 'resize',
+            cols,
+            rows,
+          }),
+        );
+      }
     },
     [],
   );
 
-  const handleTerminalKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      const targetNode = event.target as Node | null;
-      if (
-        !terminalFrameRef.current ||
-        !targetNode ||
-        !terminalFrameRef.current.contains(targetNode)
-      ) {
+  const scheduleTerminalFit = useCallback(
+    (stickToBottom = isTerminalAtBottom(terminalRef.current)) => {
+      const run = () => fitTerminal(stickToBottom);
+      window.requestAnimationFrame(() => {
+        run();
+        window.requestAnimationFrame(run);
+      });
+      window.setTimeout(run, 80);
+    },
+    [fitTerminal],
+  );
+
+  const toggleFullscreen = useCallback(async () => {
+    const frame = terminalFrameRef.current;
+    if (!frame || !connected) return;
+    try {
+      if (document.fullscreenElement === frame) {
+        await document.exitFullscreen();
         return;
       }
-
-      const data = keyEventToTerminalInput(event);
-      if (!data) return;
-      if (
-        event.target === keyboardCaptureRef.current &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        event.key.length === 1
-      ) {
-        return;
-      }
-      event.preventDefault();
-      sendTerminalInput(data);
-    },
-    [keyEventToTerminalInput, sendTerminalInput],
-  );
-
-  const handleCaptureInput = useCallback(
-    (event: FormEvent<HTMLTextAreaElement>) => {
-      const value = event.currentTarget.value;
-      if (value) {
-        sendTerminalInput(value);
-        event.currentTarget.value = '';
-      }
-    },
-    [sendTerminalInput],
-  );
-
-  const handleCapturePaste = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
-      const text = event.clipboardData.getData('text');
-      if (!text) return;
-      event.preventDefault();
-      sendTerminalInput(text);
-      event.currentTarget.value = '';
-    },
-    [sendTerminalInput],
-  );
+      await frame.requestFullscreen();
+      scheduleTerminalFit(true);
+      focusTerminal();
+    } catch (e: any) {
+      message.error(
+        e?.message || tr('无法进入全屏', 'Unable to enter fullscreen'),
+      );
+    }
+  }, [connected, focusTerminal, scheduleTerminalFit, tr]);
 
   const stopHeartbeat = useCallback(() => {
     if (heartbeatTimerRef.current !== undefined) {
@@ -210,13 +235,19 @@ const WebSSHPage: React.FC = () => {
           stopHeartbeat();
           return;
         }
-        if (Date.now() - lastServerMessageAtRef.current > webSSHHeartbeatTimeoutMs) {
+        if (
+          Date.now() - lastServerMessageAtRef.current >
+          webSSHHeartbeatTimeoutMs
+        ) {
           const text = tr(
             'WebSSH 连接超时，请重新连接',
             'WebSSH connection timed out, please reconnect',
           );
           setError(text);
-          terminalRef.current?.writeln(`\r\n${text}`);
+          flushTerminalOutput();
+          terminalRef.current?.writeln(`\r\n${text}`, () => {
+            terminalRef.current?.scrollToBottom();
+          });
           setConnected(false);
           setConnecting(false);
           stopHeartbeat();
@@ -226,7 +257,7 @@ const WebSSHPage: React.FC = () => {
         socket.send(JSON.stringify({ type: 'ping' }));
       }, webSSHHeartbeatIntervalMs);
     },
-    [markWebSSHAlive, stopHeartbeat, tr],
+    [flushTerminalOutput, markWebSSHAlive, stopHeartbeat, tr],
   );
 
   const loadTarget = useCallback(async () => {
@@ -275,6 +306,31 @@ const WebSSHPage: React.FC = () => {
   }, [loadTarget]);
 
   useEffect(() => {
+    document.body.classList.add('webssh-page-active');
+    const footerElements = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '.ant-pro-layout-footer, .global-footer',
+      ),
+    );
+    const previousFooterStyles = footerElements.map((element) => ({
+      element,
+      display: element.style.display,
+      pointerEvents: element.style.pointerEvents,
+    }));
+    footerElements.forEach((element) => {
+      element.style.display = 'none';
+      element.style.pointerEvents = 'none';
+    });
+    return () => {
+      document.body.classList.remove('webssh-page-active');
+      previousFooterStyles.forEach(({ element, display, pointerEvents }) => {
+        element.style.display = display;
+        element.style.pointerEvents = pointerEvents;
+      });
+    };
+  }, []);
+
+  useEffect(() => {
     if (!terminalHostRef.current || terminalRef.current) return;
     const terminal = new Terminal({
       cursorBlink: true,
@@ -291,93 +347,82 @@ const WebSSHPage: React.FC = () => {
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(terminalHostRef.current);
-    fitAddon.fit();
     terminal.onData(sendTerminalInput);
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    fitTerminal(true);
 
     const handleResize = () => {
-      fitAddon.fit();
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(
-          JSON.stringify({
-            type: 'resize',
-            cols: terminal.cols,
-            rows: terminal.rows,
-          }),
-        );
-      }
+      scheduleTerminalFit(isTerminalAtBottom(terminal));
     };
     window.addEventListener('resize', handleResize);
+    const resizeObserver = new ResizeObserver(() => {
+      scheduleTerminalFit(isTerminalAtBottom(terminal));
+    });
+    resizeObserver.observe(terminalHostRef.current);
+    if (terminalFrameRef.current) {
+      resizeObserver.observe(terminalFrameRef.current);
+    }
     return () => {
       window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       stopHeartbeat();
+      if (outputFlushTimerRef.current !== undefined) {
+        window.clearTimeout(outputFlushTimerRef.current);
+        outputFlushTimerRef.current = undefined;
+      }
       socketRef.current?.close();
       terminal.dispose();
       terminalRef.current = undefined;
       fitAddonRef.current = undefined;
     };
-  }, [sendTerminalInput, stopHeartbeat]);
+  }, [fitTerminal, scheduleTerminalFit, sendTerminalInput, stopHeartbeat]);
 
   const disconnect = useCallback(() => {
     pendingCredentialSaveRef.current = false;
+    lastResizeRef.current = undefined;
+    flushTerminalInput();
+    flushTerminalOutput();
     stopHeartbeat();
     socketRef.current?.close();
     socketRef.current = undefined;
     setConnected(false);
     setConnecting(false);
-  }, [stopHeartbeat]);
+  }, [flushTerminalInput, flushTerminalOutput, stopHeartbeat]);
 
   useEffect(() => {
     if (connected) {
+      scheduleTerminalFit(true);
       focusTerminal();
     }
-  }, [connected, focusTerminal]);
+  }, [connected, focusTerminal, scheduleTerminalFit]);
 
   useEffect(() => {
-    if (!connected) return;
-
-    const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (terminalFrameRef.current?.contains(target)) return;
-      if (
-        target?.closest(
-          'input, textarea, select, button, [contenteditable="true"]',
-        )
-      ) {
-        return;
-      }
-
-      const activeElement = document.activeElement;
-      if (
-        activeElement &&
-          activeElement !== document.body &&
-          activeElement !== document.documentElement &&
-          !terminalFrameRef.current?.contains(activeElement)
-      ) {
-        return;
-      }
-
-      const data = keyEventToTerminalInput(event);
-      if (!data) return;
-      event.preventDefault();
-      sendTerminalInput(data);
+    const handleFullscreenChange = () => {
+      const active = document.fullscreenElement === terminalFrameRef.current;
+      setFullscreen(active);
+      scheduleTerminalFit(true);
+      focusTerminal();
     };
-
-    document.addEventListener('keydown', handleDocumentKeyDown, true);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => {
-      document.removeEventListener('keydown', handleDocumentKeyDown, true);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
-  }, [connected, keyEventToTerminalInput, sendTerminalInput]);
+  }, [focusTerminal, scheduleTerminalFit]);
 
   const connect = async (values: API.CreateWebSSHSessionRequest) => {
     if (!target || !active) return;
     disconnect();
     setConnecting(true);
     setError('');
-    fitAddonRef.current?.fit();
+    fitTerminal(true);
     terminalRef.current?.reset();
-    terminalRef.current?.writeln(tr('正在连接 SSH...', 'Connecting to SSH...'));
+    terminalRef.current?.writeln(
+      tr('正在连接 SSH...', 'Connecting to SSH...'),
+      () => {
+        terminalRef.current?.scrollToBottom();
+      },
+    );
     try {
       const password = values.password || '';
       const shouldSaveCredential = Boolean(values.save_credential && password);
@@ -397,16 +442,11 @@ const WebSSHPage: React.FC = () => {
         );
       }
       const socket = new WebSocket(res.data.ws_url);
+      lastResizeRef.current = undefined;
       socketRef.current = socket;
       socket.onopen = () => {
         startHeartbeat(socket);
-        socket.send(
-          JSON.stringify({
-            type: 'resize',
-            cols: terminalRef.current?.cols,
-            rows: terminalRef.current?.rows,
-          }),
-        );
+        fitTerminal(true);
         focusTerminal();
       };
       socket.onmessage = (event) => {
@@ -414,7 +454,7 @@ const WebSSHPage: React.FC = () => {
           const msg = JSON.parse(event.data);
           markWebSSHAlive();
           if (msg.type === 'output') {
-            terminalRef.current?.write(msg.data || '');
+            writeTerminalOutput(msg.data || '');
           } else if (msg.type === 'pong') {
             return;
           } else if (msg.type === 'credential_saved') {
@@ -425,12 +465,16 @@ const WebSSHPage: React.FC = () => {
             pendingCredentialSaveRef.current = false;
             message.warning(
               msg.message ||
-                tr('SSH 已连接，但保存密码失败', 'SSH connected, but saving password failed'),
+                tr(
+                  'SSH 已连接，但保存密码失败',
+                  'SSH connected, but saving password failed',
+                ),
             );
           } else if (msg.type === 'status') {
             if (msg.status === 'connected') {
               setConnected(true);
               setConnecting(false);
+              scheduleTerminalFit(true);
               focusTerminal();
             }
             if (msg.status === 'closed') {
@@ -443,13 +487,16 @@ const WebSSHPage: React.FC = () => {
             const text =
               msg.message || tr('SSH 连接失败', 'SSH connection failed');
             setError(text);
-            terminalRef.current?.writeln(`\r\n${text}`);
+            flushTerminalOutput();
+            terminalRef.current?.writeln(`\r\n${text}`, () => {
+              terminalRef.current?.scrollToBottom();
+            });
             setConnected(false);
             setConnecting(false);
             socket.close();
           }
         } catch {
-          terminalRef.current?.write(String(event.data || ''));
+          writeTerminalOutput(String(event.data || ''));
         }
       };
       socket.onerror = () => {
@@ -460,6 +507,8 @@ const WebSSHPage: React.FC = () => {
         setConnecting(false);
       };
       socket.onclose = () => {
+        flushTerminalInput();
+        flushTerminalOutput();
         stopHeartbeat();
         setConnected(false);
         setConnecting(false);
@@ -471,7 +520,10 @@ const WebSSHPage: React.FC = () => {
         e?.message ||
         tr('创建 WebSSH 会话失败', 'Failed to create WebSSH session');
       setError(text);
-      terminalRef.current?.writeln(`\r\n${text}`);
+      flushTerminalOutput();
+      terminalRef.current?.writeln(`\r\n${text}`, () => {
+        terminalRef.current?.scrollToBottom();
+      });
       setConnecting(false);
     }
   };
@@ -543,6 +595,17 @@ const WebSSHPage: React.FC = () => {
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadTarget}>
               {tr('刷新', 'Refresh')}
+            </Button>
+            <Button
+              icon={
+                fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />
+              }
+              disabled={!connected}
+              onClick={toggleFullscreen}
+            >
+              {fullscreen
+                ? tr('退出全屏', 'Exit fullscreen')
+                : tr('全屏', 'Fullscreen')}
             </Button>
             <Button
               icon={<DisconnectOutlined />}
@@ -637,7 +700,10 @@ const WebSSHPage: React.FC = () => {
                   autoComplete="current-password"
                   placeholder={
                     selectedSavedCredential
-                      ? tr('留空使用该用户保存密码', 'Leave blank to use the saved password')
+                      ? tr(
+                          '留空使用该用户保存密码',
+                          'Leave blank to use the saved password',
+                        )
                       : tr('密码', 'Password')
                   }
                   onPressEnter={() => form.submit()}
@@ -646,13 +712,19 @@ const WebSSHPage: React.FC = () => {
               <Form.Item name="save_credential" valuePropName="checked">
                 <Checkbox>
                   {credentialSaved
-                    ? tr('保存/更新该用户密码', 'Save or update this user password')
+                    ? tr(
+                        '保存/更新该用户密码',
+                        'Save or update this user password',
+                      )
                     : tr('保存密码', 'Save password')}
                 </Checkbox>
               </Form.Item>
               {selectedSavedCredential && (
                 <Popconfirm
-                  title={tr('清除当前用户保存密码？', 'Clear saved password for this user?')}
+                  title={tr(
+                    '清除当前用户保存密码？',
+                    'Clear saved password for this user?',
+                  )}
                   okText={tr('清除', 'Clear')}
                   cancelText={tr('取消', 'Cancel')}
                   onConfirm={clearCredential}
@@ -675,25 +747,13 @@ const WebSSHPage: React.FC = () => {
           </div>
           <div
             className="webssh-terminal"
+            data-watermark={watermarkText}
             ref={terminalFrameRef}
             tabIndex={0}
             onClick={focusTerminal}
-            onKeyDownCapture={handleTerminalKeyDown}
             onMouseDown={focusTerminal}
           >
             <div className="webssh-terminal-screen" ref={terminalHostRef} />
-            <textarea
-              ref={keyboardCaptureRef}
-              aria-label="WebSSH keyboard input"
-              autoCapitalize="off"
-              autoComplete="off"
-              autoCorrect="off"
-              className="webssh-key-capture"
-              onInput={handleCaptureInput}
-              onPaste={handleCapturePaste}
-              spellCheck={false}
-              wrap="off"
-            />
           </div>
         </div>
       </div>

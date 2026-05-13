@@ -3,7 +3,8 @@
 #   liaison-<VERSION>-docker-amd64.tar.gz
 #       ├── images/
 #       │   ├── liaison.tar    (docker save)
-#       │   └── frontier.tar
+#       │   ├── frontier.tar
+#       │   └── guacd.tar
 #       ├── docker-compose.yaml   (release variant — no build: section)
 #       ├── .env.example
 #       ├── load.sh
@@ -38,6 +39,8 @@ TAG="${LIAISON_IMAGE_TAG:-$VERSION}"
 
 LIAISON_IMAGE="${REGISTRY}/liaison:${TAG}"
 FRONTIER_IMAGE="${REGISTRY}/frontier:${TAG}"
+GUACD_IMAGE="${GUACD_IMAGE:-guacamole/guacd:1.5.5}"
+TARGET_ARCH="${TARGET_ARCH:-amd64}"
 
 PACK_DIR="liaison-${VERSION}-docker-amd64"
 OUT_TAR="${PACK_DIR}.tar.gz"
@@ -45,13 +48,38 @@ OUT_TAR="${PACK_DIR}.tar.gz"
 echo -e "${GREEN}Packaging Docker bundle ${VERSION}...${NC}"
 echo "  liaison image:  $LIAISON_IMAGE"
 echo "  frontier image: $FRONTIER_IMAGE"
+echo "  guacd image:    $GUACD_IMAGE"
+echo "  target arch:     linux/$TARGET_ARCH"
+
+image_arch() {
+    docker image inspect --format '{{.Architecture}}' "$1" 2>/dev/null || true
+}
 
 for img in "$LIAISON_IMAGE" "$FRONTIER_IMAGE"; do
     if ! docker image inspect "$img" >/dev/null 2>&1; then
         echo -e "${RED}❌ Image $img not found locally. Run 'make images' first.${NC}" >&2
         exit 1
     fi
+    arch="$(image_arch "$img")"
+    if [ "$arch" != "$TARGET_ARCH" ]; then
+        echo -e "${RED}❌ Image $img is linux/$arch, expected linux/$TARGET_ARCH. Rebuild with 'make images'.${NC}" >&2
+        exit 1
+    fi
 done
+guacd_arch="$(image_arch "$GUACD_IMAGE")"
+if [ "$guacd_arch" != "$TARGET_ARCH" ]; then
+    if [ -n "$guacd_arch" ]; then
+        echo -e "${YELLOW}guacd image $GUACD_IMAGE is linux/$guacd_arch; pulling linux/$TARGET_ARCH...${NC}"
+    else
+        echo -e "${YELLOW}guacd image $GUACD_IMAGE not found locally; pulling linux/$TARGET_ARCH...${NC}"
+    fi
+    docker pull --platform "linux/$TARGET_ARCH" "$GUACD_IMAGE"
+    guacd_arch="$(image_arch "$GUACD_IMAGE")"
+fi
+if [ "$guacd_arch" != "$TARGET_ARCH" ]; then
+    echo -e "${RED}❌ guacd image $GUACD_IMAGE is linux/${guacd_arch:-unknown}, expected linux/$TARGET_ARCH.${NC}" >&2
+    exit 1
+fi
 
 rm -rf "$PACK_DIR" "$OUT_TAR"
 mkdir -p "$PACK_DIR/images"
@@ -60,6 +88,8 @@ echo -e "${YELLOW}docker save $LIAISON_IMAGE...${NC}"
 docker save "$LIAISON_IMAGE" -o "$PACK_DIR/images/liaison.tar"
 echo -e "${YELLOW}docker save $FRONTIER_IMAGE...${NC}"
 docker save "$FRONTIER_IMAGE" -o "$PACK_DIR/images/frontier.tar"
+echo -e "${YELLOW}docker save $GUACD_IMAGE...${NC}"
+docker save "$GUACD_IMAGE" -o "$PACK_DIR/images/guacd.tar"
 
 # Pin the image tag inside the shipped compose via .env, so the release works
 # out of the box regardless of what LIAISON_IMAGE_TAG is set to in the user's shell.
@@ -96,6 +126,7 @@ $(cd "$PACK_DIR" && find . -maxdepth 2 -type f | sort | sed 's|^\./||')
 Images shipped:
 - \`${LIAISON_IMAGE}\`
 - \`${FRONTIER_IMAGE}\`
+- \`${GUACD_IMAGE}\`
 
 ## Install
 
@@ -105,7 +136,7 @@ Images shipped:
 
 That's it. The script will:
 
-1. \`docker load\` both bundled images.
+1. \`docker load\` all bundled images.
 2. Auto-detect your public IP (fallback: prompt with 30s countdown default).
 3. Write \`.env\`, pre-create bind-mount dirs with the right ownership.
 4. \`docker compose up -d\`.

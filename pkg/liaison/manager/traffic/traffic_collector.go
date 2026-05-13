@@ -77,6 +77,11 @@ func (tc *TrafficCollector) flushLoop() {
 	}
 }
 
+// Flush immediately persists the currently buffered traffic metrics.
+func (tc *TrafficCollector) Flush() {
+	tc.flush()
+}
+
 // flush 将统计数据落盘
 func (tc *TrafficCollector) flush() {
 	tc.mu.Lock()

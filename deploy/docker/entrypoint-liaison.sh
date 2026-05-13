@@ -23,6 +23,9 @@ mkdir -p "$DATA_DIR" "$CERTS_DIR" "$LOG_DIR"
 : "${LIAISON_PUBLIC_HOST:=localhost}"
 : "${MANAGER_PORT:=443}"
 : "${LIAISON_ADMIN_EMAIL:=default@liaison.com}"
+: "${GUACD_ADDR:=127.0.0.1:4822}"
+: "${GUACD_BRIDGE_ADDR:=127.0.0.1:0}"
+: "${GUACD_BRIDGE_HOST:=127.0.0.1}"
 
 # server_url: omit :PORT for the well-known TLS / HTTP defaults so the URL
 # baked into the web console / install commands is canonical.
@@ -38,9 +41,9 @@ if [ ! -f "$CONF_DIR/liaison.yaml" ]; then
     if [ -z "${JWT_SECRET:-}" ]; then
         JWT_SECRET=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-32)
     fi
-    export FRONTIER_PORT FRONTIER_CONTROLPLANE_PORT MANAGER_PORT SERVER_URL JWT_SECRET
+    export FRONTIER_PORT FRONTIER_CONTROLPLANE_PORT MANAGER_PORT SERVER_URL JWT_SECRET GUACD_ADDR GUACD_BRIDGE_ADDR GUACD_BRIDGE_HOST
     # shellcheck disable=SC2016
-    envsubst '${FRONTIER_PORT} ${FRONTIER_CONTROLPLANE_PORT} ${MANAGER_PORT} ${SERVER_URL} ${JWT_SECRET}' \
+    envsubst '${FRONTIER_PORT} ${FRONTIER_CONTROLPLANE_PORT} ${MANAGER_PORT} ${SERVER_URL} ${JWT_SECRET} ${GUACD_ADDR} ${GUACD_BRIDGE_ADDR} ${GUACD_BRIDGE_HOST}' \
         < "$CONF_DIR/liaison.yaml.template" > "$CONF_DIR/liaison.yaml"
     echo "[entrypoint] rendered $CONF_DIR/liaison.yaml (public_host=$LIAISON_PUBLIC_HOST manager_port=$MANAGER_PORT frontier_port=$FRONTIER_PORT controlplane_port=$FRONTIER_CONTROLPLANE_PORT)"
 fi

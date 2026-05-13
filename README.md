@@ -7,7 +7,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/liaisonio/liaison)](https://goreportcard.com/report/github.com/liaisonio/liaison)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![技术栈](https://img.shields.io/badge/Tech-Go%20%7C%20TypeScript%20%7C%20React-blue)](#技术栈一览)
-[![版本](https://img.shields.io/badge/Version-v1.6.0-green)](#)
+[![版本](https://img.shields.io/badge/Version-v1.7.0-green)](#)
 
 简体中文 | [English](./README_en.md) | [日本語](./README_ja.md) | [한국어](./README_ko.md) | [Español](./README_es.md) | [Français](./README_fr.md) | [Deutsch](./README_de.md)
 
@@ -34,6 +34,7 @@ Liaison 是一个生产级应用访问解决方案，不暴露任何内网端口
 - **按入口防火墙**：每条 TCP / HTTP 访问都可配置来源 IP CIDR 白名单，在连接 accept 阶段直接过滤
 - **流量监控**：实时监控设备状态、流量统计，为运维和容量评估提供数据依据
 - **应用代理**：支持 TCP、HTTP/HTTPS、WebSocket 等多种协议的应用代理
+- **WebDesktop**：通过 guacd 在浏览器中访问 RDP / VNC 远程桌面
 - **API 自动化**：内置个人访问令牌（PAT）用于 CLI / 脚本调用，`/cli-auth` 页面提供浏览器辅助的 CLI 登录流程
 
 适用场景：
@@ -58,11 +59,11 @@ Liaison 是一个生产级应用访问解决方案，不暴露任何内网端口
 
 ```bash
 # 下载最新版本
-wget https://github.com/liaisonio/liaison/releases/download/v1.6.0/liaison-1.6.0-linux-amd64.tar.gz
+wget https://github.com/liaisonio/liaison/releases/download/v1.7.0/liaison-1.7.0-linux-amd64.tar.gz
 
 # 解压
-tar -xzf liaison-1.6.0-linux-amd64.tar.gz
-cd liaison-1.6.0-linux-amd64
+tar -xzf liaison-1.7.0-linux-amd64.tar.gz
+cd liaison-1.7.0-linux-amd64
 sudo ./install.sh
 ```
 
@@ -79,9 +80,9 @@ sudo ./install.sh
 需要 Docker 20.10+ 及 `docker compose` 插件。安装包内含已构建好的镜像,无需拉仓库或拉镜像。
 
 ```bash
-wget https://github.com/liaisonio/liaison/releases/download/v1.6.0/liaison-1.6.0-docker-amd64.tar.gz
-tar -xzf liaison-1.6.0-docker-amd64.tar.gz
-cd liaison-1.6.0-docker-amd64
+wget https://github.com/liaisonio/liaison/releases/download/v1.7.0/liaison-1.7.0-docker-amd64.tar.gz
+tar -xzf liaison-1.7.0-docker-amd64.tar.gz
+cd liaison-1.7.0-docker-amd64
 ./load.sh
 ```
 
@@ -119,6 +120,8 @@ cd liaison-1.6.0-docker-amd64
 | Windows（.exe NSIS，卸载时清理 keychain） | [`Liaison_0.1.0_x64-setup.exe`](https://github.com/liaisonio/liaison/releases/download/desktop-latest/Liaison_0.1.0_x64-setup.exe) |
 
 > v0.1 的安装包未签名。macOS Gatekeeper 与 Windows SmartScreen 首次启动会提示——macOS 上右键点击 → 打开，Windows 上选「更多信息」→「仍要运行」。Windows 需要 WebView2 Runtime；Win10 1803+ 和 Win11 已自带。
+
+> WebDesktop 说明：RDP / VNC 的网页登录依赖 `guacd`。Docker 部署会默认启动 guacd；`make package` / Release 会从 `guacamole/guacd:1.5.5` 准备内置 `bin/guacd` 和运行时，二进制 / systemd 安装脚本会优先使用安装包内置版本，缺失时再尝试系统 guacd / 包管理器 / Docker sidecar，并默认只监听 `127.0.0.1:4822`。如果你自行部署 guacd，请在 `manager.guacd_addr` 中配置地址。
 
 #### 方式 B — 命令行安装（Linux / 无图形环境）
 

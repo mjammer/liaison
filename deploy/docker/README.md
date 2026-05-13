@@ -1,6 +1,6 @@
 # Liaison Docker Compose 部署
 
-把 server 端(`liaison` 管理面 + `frontier` 连接器网关)跑在 Docker 里。Edge(连接器)依旧按原生方式安装到目标主机,不在本方案内。
+把 server 端(`liaison` 管理面 + `frontier` 连接器网关 + `guacd` WebDesktop sidecar)跑在 Docker 里。Edge(连接器)依旧按原生方式安装到目标主机,不在本方案内。
 
 ## 前置
 
@@ -60,7 +60,7 @@ docker compose logs liaison | grep -A5 "first-run credentials"
 make package-docker
 ```
 
-产出 `liaison-<VERSION>-docker-amd64.tar.gz`(~145MB,含 `docker save` 出来的 liaison + frontier 镜像、compose 文件、`.env.example`、`load.sh`)。用户解压后一条 `./load.sh && docker compose up -d` 就能起。
+产出 `liaison-<VERSION>-docker-amd64.tar.gz`(含 `docker save` 出来的 liaison + frontier + guacd 镜像、compose 文件、`.env.example`、`load.sh`)。用户解压后执行 `./load.sh` 即可加载镜像并启动服务。
 
 ## 数据持久化
 
@@ -69,14 +69,14 @@ make package-docker
 | 目录 | 内容 |
 |:---|:---|
 | `data/` | SQLite 数据库 `liaison.db`、初始化标记 |
-| `certs/` | `server.crt` + `server.key`(两容器共享) |
+| `certs/` | `server.crt` + `server.key`(liaison/frontier 共享) |
 | `logs/` | liaison 进程日志 |
 
 `.gitignore` 已经忽略这三个目录。
 
 ## 网络与端口
 
-容器以 `network_mode: host` 运行 —— 不走 docker bridge,也不做端口映射。`MANAGER_PORT` / `FRONTIER_PORT` 是直接绑在宿主机网卡上的端口,跟 systemd 部署完全等价。liaison 容器加了 `cap_add: NET_BIND_SERVICE`,所以可以以 uid=1000 的非 root 用户绑 443 这种特权端口。
+liaison / frontier / guacd 容器以 `network_mode: host` 运行 —— 不走 docker bridge,也不做公网端口映射。`MANAGER_PORT` / `FRONTIER_PORT` 是直接绑在宿主机网卡上的端口,跟 systemd 部署完全等价。liaison 容器加了 `cap_add: NET_BIND_SERVICE`,所以可以以 uid=1000 的非 root 用户绑 443 这种特权端口。guacd 显式绑定宿主机 `127.0.0.1:4822`，不对公网开放。
 
 | 端口 | 用途 | 是否对外 |
 |:---|:---|:---|
@@ -84,8 +84,11 @@ make package-docker
 | `FRONTIER_PORT`(默认 30012) | 连接器接入 | 是 |
 | `FRONTIER_CONTROLPLANE_PORT`(默认 30010) | liaison 主动断开连接器连接 | 否(loopback) |
 | 127.0.0.1:30011 | liaison ↔ frontier 本地通信 | 否(loopback) |
+| 127.0.0.1:4822 | liaison ↔ guacd WebDesktop 转换 | 否(loopback) |
 
 Edge 连接器在 Web 里创建时会自动把 `LIAISON_PUBLIC_HOST:FRONTIER_PORT` 写进安装命令。改了 `FRONTIER_PORT` 之后,已发出去的 edge 安装命令也会指向新端口,老的 edge 需要重新下发。
+
+WebDesktop(RDP/VNC) 依赖 `guacd` sidecar。Compose 默认启动 `guacamole/guacd:1.5.5`，绑定 `127.0.0.1:4822`，并让 liaison 连接这个本机地址。guacd 回连 manager 创建的临时桥接端口也走 `127.0.0.1`，所以临时端口不会暴露到公网。
 
 ## 常用操作
 
@@ -96,6 +99,7 @@ docker compose ps
 # 跟踪日志
 docker compose logs -f liaison
 docker compose logs -f frontier
+docker compose logs -f guacd
 
 # 升级:重新 make package,然后
 docker compose build --no-cache
@@ -103,11 +107,11 @@ docker compose up -d
 
 # 彻底删除(保留数据)— 对应离线包里的 ./uninstall.sh
 docker compose down
-docker rmi liaison/liaison:1.4.0 liaison/frontier:1.4.0
+docker rmi liaison/liaison:1.7.0 liaison/frontier:1.7.0 guacamole/guacd:1.5.5
 
 # 彻底删除并清空数据(不可恢复)— 对应离线包里的 ./uninstall.sh --purge
 docker compose down
-docker rmi liaison/liaison:1.4.0 liaison/frontier:1.4.0
+docker rmi liaison/liaison:1.7.0 liaison/frontier:1.7.0 guacamole/guacd:1.5.5
 rm -rf data certs logs .env
 ```
 

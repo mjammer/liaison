@@ -520,6 +520,7 @@ func (cp *controlPlane) GetEdgeScanApplicationTask(_ context.Context, req *v1.Ge
 			80:    "http",
 			443:   "http",
 			3389:  "rdp",
+			5900:  "vnc",
 			3306:  "mysql",
 			5432:  "postgresql",
 			6379:  "redis",

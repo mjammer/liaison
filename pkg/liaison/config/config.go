@@ -47,6 +47,9 @@ type Manager struct {
 	FrontierEdgePort int           `yaml:"frontier_edge_port,omitempty" json:"frontier_edge_port"` // Edge 和 Frontier 之间的通信端口
 	JWTSecret        string        `yaml:"jwt_secret,omitempty" json:"jwt_secret"`                 // JWT 密钥（必需，至少32字符）
 	CredentialSecret string        `yaml:"credential_secret,omitempty" json:"credential_secret"`   // WebSSH 凭据加密密钥；为空时回退使用 JWTSecret
+	GuacdAddr        string        `yaml:"guacd_addr,omitempty" json:"guacd_addr"`                 // guacd 地址，用于 WebDesktop
+	GuacdBridgeAddr  string        `yaml:"guacd_bridge_addr,omitempty" json:"guacd_bridge_addr"`   // manager 本地临时桥接监听地址
+	GuacdBridgeHost  string        `yaml:"guacd_bridge_host,omitempty" json:"guacd_bridge_host"`   // guacd 回连 manager 临时桥接端口时使用的主机名
 }
 
 type Frontier struct {
@@ -112,6 +115,12 @@ func initConf() error {
 	}
 	if Conf.Manager.FrontierEdgePort == 0 {
 		Conf.Manager.FrontierEdgePort = 30012
+	}
+	if Conf.Manager.GuacdAddr == "" {
+		Conf.Manager.GuacdAddr = "127.0.0.1:4822"
+	}
+	if Conf.Manager.GuacdBridgeAddr == "" {
+		Conf.Manager.GuacdBridgeAddr = "127.0.0.1:0"
 	}
 	return nil
 }

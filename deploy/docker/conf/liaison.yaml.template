@@ -17,6 +17,9 @@ manager:
   frontier_edge_port: ${FRONTIER_PORT}
   server_url: ${SERVER_URL}
   jwt_secret: ${JWT_SECRET}
+  guacd_addr: ${GUACD_ADDR}
+  guacd_bridge_addr: ${GUACD_BRIDGE_ADDR}
+  guacd_bridge_host: ${GUACD_BRIDGE_HOST}
 frontier:
   controlplane_url: http://127.0.0.1:${FRONTIER_CONTROLPLANE_PORT}
   dial:

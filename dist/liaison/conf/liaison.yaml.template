@@ -17,6 +17,9 @@ manager:
   frontier_edge_port: ${FRONTIER_PORT}  # Edge 和 Frontier 之间的通信端口
   server_url: ${SERVER_URL}
   jwt_secret: ${JWT_SECRET}  # JWT密钥（必需，至少32字符，安装时自动生成）
+  guacd_addr: 127.0.0.1:4822  # WebDesktop 使用的 guacd 地址；未安装 guacd 时不影响普通代理
+  guacd_bridge_addr: 127.0.0.1:0  # manager 临时桥接监听地址
+  guacd_bridge_host: 127.0.0.1  # guacd 回连 manager 临时桥接端口时使用的主机名
 frontier:
   controlplane_url: http://127.0.0.1:${FRONTIER_CONTROLPLANE_PORT}
   dial:

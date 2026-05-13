@@ -79,6 +79,7 @@ const DashboardPage: React.FC = () => {
         udp: 'UDP',
         ssh: 'SSH',
         rdp: 'RDP',
+        vnc: 'VNC',
         database: tr('数据库', 'Database'),
         mysql: 'MySQL',
         postgresql: 'PostgreSQL',

@@ -76,6 +76,18 @@ if [[ "$LANG_CODE" == "zh_CN" ]]; then
     MSG_COPYING_EDGE="正在复制 edge 二进制文件和脚本..."
     MSG_EDGE_COPIED="Edge 文件已复制"
     MSG_WARNING_EDGE_NOT_FOUND="警告: edge 目录未找到，跳过 edge 文件复制"
+    MSG_INSTALLING_GUACD="正在安装 WebDesktop 依赖 guacd..."
+    MSG_GUACD_FOUND="已找到 guacd:"
+    MSG_GUACD_BUNDLED_FOUND="已找到安装包内置 guacd:"
+    MSG_GUACD_RUNTIME_COPIED="已安装 WebDesktop guacd 运行时"
+    MSG_GUACD_PACKAGE_INSTALLED="guacd 软件包安装成功"
+    MSG_GUACD_DOCKER_SERVICE="未找到系统 guacd，已配置 Docker guacd sidecar 服务"
+    MSG_GUACD_SERVICE_INSTALLED="guacd systemd 服务已安装"
+    MSG_WARNING_GUACD_FAILED="警告: guacd 自动安装失败，WebDesktop(RDP/VNC) 将不可用；普通代理不受影响"
+    MSG_STARTING_GUACD="正在启动 guacd 服务..."
+    MSG_GUACD_STARTED="guacd 服务已启动"
+    MSG_WARNING_GUACD_START_FAILED="警告: guacd 服务未能启动，WebDesktop(RDP/VNC) 暂不可用"
+    MSG_GUACD_STATUS="WebDesktop guacd:"
     MSG_GENERATING_CERTS="正在生成 TLS 证书..."
     MSG_CERTS_GENERATED="TLS 证书已生成"
     MSG_CERTS_EXIST="证书已存在，跳过生成"
@@ -170,6 +182,18 @@ else
     MSG_COPYING_EDGE="Copying edge binaries and scripts for all platforms..."
     MSG_EDGE_COPIED="Edge files copied"
     MSG_WARNING_EDGE_NOT_FOUND="Warning: edge directory not found, skipping edge files copy"
+    MSG_INSTALLING_GUACD="Installing WebDesktop dependency guacd..."
+    MSG_GUACD_FOUND="Found guacd:"
+    MSG_GUACD_BUNDLED_FOUND="Found bundled guacd:"
+    MSG_GUACD_RUNTIME_COPIED="Installed WebDesktop guacd runtime"
+    MSG_GUACD_PACKAGE_INSTALLED="guacd package installed successfully"
+    MSG_GUACD_DOCKER_SERVICE="System guacd not found; configured Docker guacd sidecar service"
+    MSG_GUACD_SERVICE_INSTALLED="guacd systemd service installed"
+    MSG_WARNING_GUACD_FAILED="Warning: guacd auto-install failed; WebDesktop (RDP/VNC) will be unavailable, normal proxies are unaffected"
+    MSG_STARTING_GUACD="Starting guacd service..."
+    MSG_GUACD_STARTED="guacd service started"
+    MSG_WARNING_GUACD_START_FAILED="Warning: guacd service failed to start; WebDesktop (RDP/VNC) is unavailable"
+    MSG_GUACD_STATUS="WebDesktop guacd:"
     MSG_GENERATING_CERTS="Generating TLS certificates..."
     MSG_CERTS_GENERATED="TLS certificates generated in"
     MSG_CERTS_EXIST="Certificates already exist, skipping generation"
@@ -250,6 +274,209 @@ BIN_DIR="/opt/liaison/bin"
 WEB_DIR="/opt/liaison/web"
 EDGE_DIR="/opt/liaison/edge"
 CERTS_DIR="/opt/liaison/certs"
+GUACD_SERVICE_NAME="liaison-guacd"
+GUACD_CONTAINER_NAME="liaison-guacd"
+GUACD_IMAGE="${GUACD_IMAGE:-guacamole/guacd:1.5.5}"
+GUACD_PORT="${GUACD_PORT:-4822}"
+GUACD_MANAGED_SERVICE=""
+GUACD_ROOTFS_DIR="$INSTALL_DIR/guacd-rootfs"
+GUACD_PLUGIN_DIR="$INSTALL_DIR/guacd"
+
+install_bundled_guacd_runtime() {
+    if [[ ! -d "$SCRIPT_DIR/guacd-rootfs" ]]; then
+        return 0
+    fi
+
+    rm -rf "$GUACD_ROOTFS_DIR" "$GUACD_PLUGIN_DIR"
+    cp -a "$SCRIPT_DIR/guacd-rootfs" "$GUACD_ROOTFS_DIR"
+    ln -sfn "$GUACD_ROOTFS_DIR/opt/guacamole/lib" "$GUACD_PLUGIN_DIR"
+    chown -R root:root "$GUACD_ROOTFS_DIR"
+    chown -h root:root "$GUACD_PLUGIN_DIR" 2>/dev/null || true
+    chmod -R u+rwX,go+rX,go-w "$GUACD_ROOTFS_DIR"
+    echo -e "${GREEN}${MSG_GUACD_RUNTIME_COPIED}${NC}"
+}
+
+bundled_guacd_runtime_ready() {
+    [[ -x "$GUACD_ROOTFS_DIR/opt/guacamole/sbin/guacd" ]] && \
+    [[ -x "$GUACD_ROOTFS_DIR/lib/ld-musl-x86_64.so.1" ]] && \
+    [[ -d "$GUACD_PLUGIN_DIR" ]]
+}
+
+find_bundled_guacd_binary() {
+    local candidate
+    for candidate in "$BIN_DIR/guacd" "$SCRIPT_DIR/bin/guacd"; do
+        if [[ -x "$candidate" ]] && bundled_guacd_runtime_ready; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_guacd_binary() {
+    local candidate
+    candidate="$(command -v guacd 2>/dev/null || true)"
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+        echo "$candidate"
+        return 0
+    fi
+    for candidate in /usr/sbin/guacd /usr/local/sbin/guacd /usr/bin/guacd /usr/local/bin/guacd; do
+        if [[ -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+install_guacd_package() {
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y guacd
+        return $?
+    fi
+    if command -v dnf >/dev/null 2>&1; then
+        dnf install -y guacd || dnf install -y guacamole-server
+        return $?
+    fi
+    if command -v yum >/dev/null 2>&1; then
+        yum install -y guacd || yum install -y guacamole-server
+        return $?
+    fi
+    if command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install guacd || zypper --non-interactive install guacamole-server
+        return $?
+    fi
+    return 1
+}
+
+write_native_guacd_service() {
+    local guacd_bin="$1"
+    cat > "/etc/systemd/system/${GUACD_SERVICE_NAME}.service" <<EOF
+[Unit]
+Description=Liaison WebDesktop guacd Service
+Documentation=https://guacamole.apache.org/
+After=network.target network-online.target
+Wants=network-online.target
+StartLimitInterval=60s
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+Group=${SERVICE_GROUP}
+ExecStart=${guacd_bin} -f -b 127.0.0.1 -l ${GUACD_PORT}
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=${GUACD_SERVICE_NAME}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chmod 644 "/etc/systemd/system/${GUACD_SERVICE_NAME}.service"
+    GUACD_MANAGED_SERVICE="$GUACD_SERVICE_NAME"
+}
+
+write_docker_guacd_service() {
+    local docker_bin="$1"
+    if ! "$docker_bin" image inspect "$GUACD_IMAGE" >/dev/null 2>&1; then
+        "$docker_bin" pull "$GUACD_IMAGE"
+    fi
+    cat > "/etc/systemd/system/${GUACD_SERVICE_NAME}.service" <<EOF
+[Unit]
+Description=Liaison WebDesktop guacd Docker Sidecar
+Documentation=https://guacamole.apache.org/
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+StartLimitInterval=60s
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStartPre=-${docker_bin} rm -f ${GUACD_CONTAINER_NAME}
+ExecStart=${docker_bin} run --rm --name ${GUACD_CONTAINER_NAME} --network host ${GUACD_IMAGE} /opt/guacamole/sbin/guacd -f -b 127.0.0.1 -l ${GUACD_PORT}
+ExecStop=-${docker_bin} stop ${GUACD_CONTAINER_NAME}
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=${GUACD_SERVICE_NAME}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chmod 644 "/etc/systemd/system/${GUACD_SERVICE_NAME}.service"
+    GUACD_MANAGED_SERVICE="$GUACD_SERVICE_NAME"
+}
+
+install_guacd_dependency() {
+    echo -e "${YELLOW}${MSG_INSTALLING_GUACD}${NC}"
+
+    if systemctl is-active --quiet guacd 2>/dev/null; then
+        GUACD_MANAGED_SERVICE="guacd"
+        echo -e "${GREEN}${MSG_GUACD_FOUND} guacd.service${NC}"
+        return 0
+    fi
+    local bundled_guacd_bin
+    bundled_guacd_bin="$(find_bundled_guacd_binary || true)"
+    if [[ -n "$bundled_guacd_bin" ]]; then
+        echo -e "${GREEN}${MSG_GUACD_BUNDLED_FOUND} ${bundled_guacd_bin}${NC}"
+        write_native_guacd_service "$bundled_guacd_bin"
+        echo -e "${GREEN}${MSG_GUACD_SERVICE_INSTALLED}${NC}"
+        return 0
+    fi
+
+    if [[ -f "/etc/systemd/system/${GUACD_SERVICE_NAME}.service" ]]; then
+        GUACD_MANAGED_SERVICE="$GUACD_SERVICE_NAME"
+        echo -e "${GREEN}${MSG_GUACD_FOUND} ${GUACD_SERVICE_NAME}.service${NC}"
+        return 0
+    fi
+
+    local guacd_bin
+    guacd_bin="$(find_guacd_binary || true)"
+    if [[ -z "$guacd_bin" ]]; then
+        if install_guacd_package; then
+            echo -e "${GREEN}${MSG_GUACD_PACKAGE_INSTALLED}${NC}"
+            if systemctl is-active --quiet guacd 2>/dev/null; then
+                GUACD_MANAGED_SERVICE="guacd"
+                echo -e "${GREEN}${MSG_GUACD_FOUND} guacd.service${NC}"
+                return 0
+            fi
+            guacd_bin="$(find_guacd_binary || true)"
+        fi
+    fi
+
+    if [[ -n "$guacd_bin" ]]; then
+        echo -e "${GREEN}${MSG_GUACD_FOUND} ${guacd_bin}${NC}"
+        write_native_guacd_service "$guacd_bin"
+        echo -e "${GREEN}${MSG_GUACD_SERVICE_INSTALLED}${NC}"
+        return 0
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        if write_docker_guacd_service "$(command -v docker)"; then
+            echo -e "${GREEN}${MSG_GUACD_DOCKER_SERVICE}${NC}"
+            return 0
+        fi
+    fi
+
+    echo -e "${YELLOW}${MSG_WARNING_GUACD_FAILED}${NC}"
+    return 1
+}
 
 echo -e "${GREEN}${MSG_INSTALLING}${NC}"
 
@@ -271,7 +498,8 @@ fi
 # Create directories
 echo -e "${YELLOW}${MSG_CREATING_DIRS}${NC}"
 mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR" "$BIN_DIR" "$WEB_DIR" "$EDGE_DIR" "$CERTS_DIR"
-chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
+chown root:root "$INSTALL_DIR" "$CONFIG_DIR" "$BIN_DIR" "$WEB_DIR" "$EDGE_DIR"
+chown "$SERVICE_USER:$SERVICE_GROUP" "$DATA_DIR" "$LOG_DIR" "$CERTS_DIR"
 chmod 755 "$INSTALL_DIR"
 
 # Set specific permissions
@@ -307,7 +535,7 @@ fi
 echo -e "${YELLOW}${MSG_COPYING_BINARIES}${NC}"
 if [[ -d "$SCRIPT_DIR/bin" ]]; then
     cp -f "$SCRIPT_DIR/bin/"* "$BIN_DIR/"
-    chown "$SERVICE_USER:$SERVICE_GROUP" "$BIN_DIR"/*
+    chown root:root "$BIN_DIR"/*
     chmod 755 "$BIN_DIR"/*
     echo -e "${GREEN}${MSG_BINARIES_COPIED}${NC}"
     # Check if frontier binary exists
@@ -317,6 +545,11 @@ if [[ -d "$SCRIPT_DIR/bin" ]]; then
 else
     echo -e "${YELLOW}${MSG_WARNING_BIN_NOT_FOUND}${NC}"
 fi
+
+# Install or configure guacd for WebDesktop after binaries are copied so a
+# bundled bin/guacd is served from the permanent /opt/liaison/bin path.
+install_bundled_guacd_runtime
+install_guacd_dependency || true
 
 # Function to read input with countdown
 read_with_countdown() {
@@ -491,8 +724,8 @@ if [[ -d "$SCRIPT_DIR/conf" ]]; then
             -e "s|\${FRONTIER_CONTROLPLANE_PORT}|${FRONTIER_CONTROLPLANE_PORT}|g" \
             -e "s|\${SERVER_URL}|${SERVER_URL}|g" \
             "$SCRIPT_DIR/conf/liaison.yaml.template" > "$CONFIG_DIR/liaison.yaml"
-        chown "$SERVICE_USER:$SERVICE_GROUP" "$CONFIG_DIR/liaison.yaml"
-        chmod 644 "$CONFIG_DIR/liaison.yaml"
+        chown root:"$SERVICE_GROUP" "$CONFIG_DIR/liaison.yaml"
+        chmod 640 "$CONFIG_DIR/liaison.yaml"
         echo -e "${GREEN}liaison.yaml ${MSG_CONFIG_RENDERED} with public IP: ${BOLD}${CYAN}$PUBLIC_ADDR${NC}${GREEN}${NC}"
         echo -e "${GREEN}${MSG_JWT_GENERATED}${NC}"
     fi
@@ -504,8 +737,8 @@ if [[ -d "$SCRIPT_DIR/conf" ]]; then
             -e "s|\${FRONTIER_PORT}|${FRONTIER_PORT}|g" \
             -e "s|\${FRONTIER_CONTROLPLANE_PORT}|${FRONTIER_CONTROLPLANE_PORT}|g" \
             "$SCRIPT_DIR/conf/frontier.yaml.template" > "$CONFIG_DIR/frontier.yaml"
-        chown "$SERVICE_USER:$SERVICE_GROUP" "$CONFIG_DIR/frontier.yaml"
-        chmod 644 "$CONFIG_DIR/frontier.yaml"
+        chown root:"$SERVICE_GROUP" "$CONFIG_DIR/frontier.yaml"
+        chmod 640 "$CONFIG_DIR/frontier.yaml"
         echo -e "${GREEN}frontier.yaml ${MSG_CONFIG_RENDERED}${NC}"
     fi
 fi
@@ -518,8 +751,8 @@ if [[ -d "$SCRIPT_DIR/etc" ]]; then
             # Only copy if not already rendered from template
             if [[ ! -f "$CONFIG_DIR/$filename" ]]; then
                 cp -f "$yaml_file" "$CONFIG_DIR/"
-                chown "$SERVICE_USER:$SERVICE_GROUP" "$CONFIG_DIR/$filename"
-                chmod 644 "$CONFIG_DIR/$filename"
+                chown root:"$SERVICE_GROUP" "$CONFIG_DIR/$filename"
+                chmod 640 "$CONFIG_DIR/$filename"
             fi
         fi
     done
@@ -532,7 +765,7 @@ fi
 echo -e "${YELLOW}${MSG_COPYING_WEB}${NC}"
 if [[ -d "$SCRIPT_DIR/web" ]]; then
     cp -r "$SCRIPT_DIR/web/"* "$WEB_DIR/" 2>/dev/null || true
-    chown -R "$SERVICE_USER:$SERVICE_GROUP" "$WEB_DIR"
+    chown -R root:root "$WEB_DIR"
     chmod -R 755 "$WEB_DIR"
     echo -e "${GREEN}${MSG_WEB_COPIED}${NC}"
 else
@@ -543,7 +776,7 @@ fi
 echo -e "${YELLOW}${MSG_COPYING_EDGE}${NC}"
 if [[ -d "$SCRIPT_DIR/edge" ]]; then
     cp -f "$SCRIPT_DIR/edge/"* "$EDGE_DIR/" 2>/dev/null || true
-    chown "$SERVICE_USER:$SERVICE_GROUP" "$EDGE_DIR"/* 2>/dev/null || true
+    chown root:root "$EDGE_DIR"/* 2>/dev/null || true
     # Set executable permission for scripts, read-only for tar.gz files
     chmod 755 "$EDGE_DIR"/install.sh 2>/dev/null || true
     chmod 755 "$EDGE_DIR"/uninstall.sh 2>/dev/null || true
@@ -584,15 +817,39 @@ systemctl daemon-reload
 # Enable services
 echo -e "${YELLOW}${MSG_ENABLING_SERVICES}${NC}"
 systemctl enable "$SERVICE_NAME"
+if [[ -n "$GUACD_MANAGED_SERVICE" ]]; then
+    systemctl enable "$GUACD_MANAGED_SERVICE" || true
+    echo -e "${GREEN}${GUACD_MANAGED_SERVICE} ${MSG_SERVICE_ENABLED}${NC}"
+fi
 if [[ -f "/etc/systemd/system/frontier.service" ]]; then
     systemctl enable frontier
     echo -e "${GREEN}frontier ${MSG_SERVICE_ENABLED}${NC}"
 fi
 
-# Start services in order: frontier first, then liaison
+# Start services in order: guacd first, frontier, then liaison
 echo -e "${YELLOW}${MSG_STARTING_SERVICES}${NC}"
 LIAISON_STARTED=false
 FRONTIER_STARTED=false
+GUACD_STARTED=false
+if [[ -n "$GUACD_MANAGED_SERVICE" ]]; then
+    echo -e "${YELLOW}${MSG_STARTING_GUACD}${NC}"
+    systemctl daemon-reload
+    if [[ "$GUACD_MANAGED_SERVICE" == "$GUACD_SERVICE_NAME" ]] && systemctl is-active --quiet "$GUACD_MANAGED_SERVICE"; then
+        systemctl restart "$GUACD_MANAGED_SERVICE" || true
+    else
+        systemctl start "$GUACD_MANAGED_SERVICE" || true
+    fi
+    sleep 2
+    if systemctl is-active --quiet "$GUACD_MANAGED_SERVICE"; then
+        echo -e "${GREEN}${MSG_GUACD_STARTED}${NC}"
+        GUACD_STARTED=true
+    else
+        echo -e "${YELLOW}${MSG_WARNING_GUACD_START_FAILED}${NC}"
+        systemctl status "$GUACD_MANAGED_SERVICE" --no-pager -l || true
+        echo -e "${YELLOW}Trying to check logs: journalctl -u $GUACD_MANAGED_SERVICE -n 20 --no-pager${NC}"
+        journalctl -u "$GUACD_MANAGED_SERVICE" -n 20 --no-pager || true
+    fi
+fi
 if [[ -f "/etc/systemd/system/frontier.service" ]]; then
     echo -e "${YELLOW}${MSG_STARTING_FRONTIER}${NC}"
     # Reload systemd to pick up any service file changes
@@ -694,6 +951,11 @@ if [[ -f "/etc/systemd/system/frontier.service" ]]; then
         FRONTIER_STARTED=true
     fi
 fi
+if [[ -n "$GUACD_MANAGED_SERVICE" ]]; then
+    if systemctl is-active --quiet "$GUACD_MANAGED_SERVICE"; then
+        GUACD_STARTED=true
+    fi
+fi
 
 echo -e "${GREEN}${MSG_INSTALLATION_COMPLETE}${NC}"
 echo ""
@@ -726,6 +988,11 @@ echo -e "${BOLD}${CYAN}═══════════════════
 echo ""
 # Service status
 echo -e "${BOLD}${YELLOW}  ${MSG_SERVICE_STATUS}${NC}"
+if [[ "$GUACD_STARTED" == "true" ]]; then
+    echo -e "${GREEN}    ✓ ${MSG_GUACD_STATUS} ${MSG_RUNNING}${NC}"
+else
+    echo -e "${YELLOW}    ✗ ${MSG_GUACD_STATUS} ${MSG_NOT_RUNNING}${NC}"
+fi
 if [[ "$FRONTIER_STARTED" == "true" ]]; then
     echo -e "${GREEN}    ✓ frontier: ${MSG_RUNNING}${NC}"
 else
@@ -785,11 +1052,19 @@ fi
 echo ""
 echo -e "${GREEN}${MSG_SERVICE_MANAGEMENT}${NC}"
 if [[ -f "/etc/systemd/system/frontier.service" ]]; then
-    echo "  Start:   systemctl start $SERVICE_NAME frontier"
-    echo "  Stop:    systemctl stop $SERVICE_NAME frontier"
-    echo "  Restart: systemctl restart $SERVICE_NAME frontier"
-    echo "  Status:  systemctl status $SERVICE_NAME frontier"
-    echo "  Logs:    journalctl -u $SERVICE_NAME -f (or journalctl -u frontier -f)"
+    if [[ -f "/etc/systemd/system/${GUACD_SERVICE_NAME}.service" ]]; then
+        echo "  Start:   systemctl start $GUACD_MANAGED_SERVICE frontier $SERVICE_NAME"
+        echo "  Stop:    systemctl stop $SERVICE_NAME frontier $GUACD_MANAGED_SERVICE"
+        echo "  Restart: systemctl restart $GUACD_MANAGED_SERVICE frontier $SERVICE_NAME"
+        echo "  Status:  systemctl status $SERVICE_NAME frontier $GUACD_MANAGED_SERVICE"
+        echo "  Logs:    journalctl -u $SERVICE_NAME -f (or journalctl -u frontier -f / journalctl -u $GUACD_MANAGED_SERVICE -f)"
+    else
+        echo "  Start:   systemctl start $SERVICE_NAME frontier"
+        echo "  Stop:    systemctl stop $SERVICE_NAME frontier"
+        echo "  Restart: systemctl restart $SERVICE_NAME frontier"
+        echo "  Status:  systemctl status $SERVICE_NAME frontier"
+        echo "  Logs:    journalctl -u $SERVICE_NAME -f (or journalctl -u frontier -f)"
+    fi
 else
     echo "  Start:   systemctl start $SERVICE_NAME"
     echo "  Stop:    systemctl stop $SERVICE_NAME"

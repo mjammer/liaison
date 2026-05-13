@@ -6,6 +6,9 @@ manager:
       enable: false
   db: /opt/liaison/data/liaison.db
   jwt_secret: "YJEVmDSDk1FCTzUCJVFsugywxcEUQ4vh"
+  guacd_addr: 127.0.0.1:4822
+  guacd_bridge_addr: 127.0.0.1:0
+  guacd_bridge_host: 127.0.0.1
 frontier:
   dial:
     addrs:

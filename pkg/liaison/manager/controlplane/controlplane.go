@@ -9,6 +9,7 @@ import (
 	"github.com/liaisonio/liaison/pkg/liaison/manager/frontierbound"
 	"github.com/liaisonio/liaison/pkg/liaison/repo"
 	"github.com/liaisonio/liaison/pkg/proto"
+	"github.com/liaisonio/liaison/pkg/trafficconn"
 )
 
 type ControlPlane interface {
@@ -43,6 +44,13 @@ type ControlPlane interface {
 	TouchWebSSHCredential(ctx context.Context, proxyID uint, username string) error
 	DeleteWebSSHCredential(ctx context.Context, proxyID uint, username string) error
 
+	GetWebDesktopTarget(ctx context.Context, proxyID uint) (*WebDesktopTarget, error)
+	OpenWebDesktopStream(ctx context.Context, proxyID uint) (net.Conn, *WebDesktopTarget, error)
+	GetWebDesktopCredentialSecret(ctx context.Context, proxyID uint, protocol, username, domain string) (*WebDesktopCredentialSecret, error)
+	SaveWebDesktopCredential(ctx context.Context, proxyID uint, protocol, username, domain, encryptedPassword, nonce string) error
+	TouchWebDesktopCredential(ctx context.Context, proxyID uint, protocol, username, domain string) error
+	DeleteWebDesktopCredential(ctx context.Context, proxyID uint, protocol, username, domain string) error
+
 	CreateEdgeScanApplicationTask(ctx context.Context, req *v1.CreateEdgeScanApplicationTaskRequest) (*v1.CreateEdgeScanApplicationTaskResponse, error)
 	GetEdgeScanApplicationTask(ctx context.Context, req *v1.GetEdgeScanApplicationTaskRequest) (*v1.GetEdgeScanApplicationTaskResponse, error)
 
@@ -64,11 +72,12 @@ type ControlPlane interface {
 	RestoreProxyListeners() error
 }
 
-func NewControlPlane(conf *config.Configuration, repo repo.Repo, frontierBound frontierbound.FrontierBound) (ControlPlane, error) {
+func NewControlPlane(conf *config.Configuration, repo repo.Repo, frontierBound frontierbound.FrontierBound, trafficRecorder trafficconn.Recorder) (ControlPlane, error) {
 	cp := &controlPlane{
-		conf:          conf,
-		repo:          repo,
-		frontierBound: frontierBound,
+		conf:            conf,
+		repo:            repo,
+		frontierBound:   frontierBound,
+		trafficRecorder: trafficRecorder,
 	}
 
 	// 初始化任务检查
@@ -78,9 +87,10 @@ func NewControlPlane(conf *config.Configuration, repo repo.Repo, frontierBound f
 }
 
 type controlPlane struct {
-	conf          *config.Configuration
-	repo          repo.Repo
-	frontierBound frontierbound.FrontierBound
+	conf            *config.Configuration
+	repo            repo.Repo
+	frontierBound   frontierbound.FrontierBound
+	trafficRecorder trafficconn.Recorder
 
 	// deps
 	proxyManager    proto.ProxyManager

@@ -59,6 +59,11 @@ export default defineConfig({
       hideInMenu: true,
     },
     {
+      path: '/webdesktop/:proxyId',
+      component: './WebDesktop',
+      hideInMenu: true,
+    },
+    {
       name: '设备/应用',
       path: '/resource',
       icon: 'AppstoreOutlined',

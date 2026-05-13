@@ -131,6 +131,14 @@ type Dao interface {
 	DeleteWebSSHCredential(proxyID, userID uint, username string) error
 	DeleteWebSSHCredentialByProxyID(proxyID uint) error
 
+	// WebDesktopCredential 相关方法
+	ListWebDesktopCredentialsByProxyAndUser(proxyID, userID uint, protocol string) ([]*model.WebDesktopCredential, error)
+	GetWebDesktopCredential(proxyID, userID uint, protocol, username, domain string) (*model.WebDesktopCredential, error)
+	UpsertWebDesktopCredential(credential *model.WebDesktopCredential) error
+	TouchWebDesktopCredential(proxyID, userID uint, protocol, username, domain string) error
+	DeleteWebDesktopCredential(proxyID, userID uint, protocol, username, domain string) error
+	DeleteWebDesktopCredentialByProxyID(proxyID uint) error
+
 	// 资源清理
 	Close() error
 }
@@ -190,6 +198,7 @@ func (d *dao) initDB() error {
 		&model.ProxyFirewallRule{},
 		&model.WebSSHHostKey{},
 		&model.WebSSHCredential{},
+		&model.WebDesktopCredential{},
 	); err != nil {
 		return err
 	}

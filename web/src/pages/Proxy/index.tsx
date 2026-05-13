@@ -25,6 +25,7 @@ import {
   ProColumns,
   ProFormDigit,
   ProFormSelect,
+  ProFormSwitch,
   ProFormText,
   ProFormTextArea,
   ProTable,
@@ -49,6 +50,30 @@ import { useEffect, useRef, useState } from 'react';
 
 const { Text } = Typography;
 
+const webOnlyApplicationTypes = new Set(['ssh', 'rdp', 'vnc']);
+const protocolTagColors: Record<string, string> = {
+  http: 'green',
+  tcp: 'blue',
+  ssh: 'purple',
+  rdp: 'geekblue',
+  vnc: 'cyan',
+  mysql: 'volcano',
+  postgresql: 'processing',
+  redis: 'red',
+  mongodb: 'success',
+};
+const protocolLabels: Record<string, string> = {
+  http: 'HTTP',
+  tcp: 'TCP',
+  ssh: 'SSH',
+  rdp: 'RDP',
+  vnc: 'VNC',
+  mysql: 'MySQL',
+  postgresql: 'PostgreSQL',
+  redis: 'Redis',
+  mongodb: 'MongoDB',
+};
+
 const ProxyPage: React.FC = () => {
   const { tr } = useI18n();
   const actionRef = useRef<ActionType>();
@@ -70,6 +95,8 @@ const ProxyPage: React.FC = () => {
   const [selectedApplicationId, setSelectedApplicationId] = useState<
     number | undefined
   >();
+  const [createExposePublicPort, setCreateExposePublicPort] = useState(false);
+  const [editExposePublicPort, setEditExposePublicPort] = useState(false);
   const hasProcessedUrlRef = useRef(false); // 使用 ref 跟踪是否已处理过 URL 参数
 
   // 防火墙 Drawer 状态
@@ -447,6 +474,36 @@ const ProxyPage: React.FC = () => {
 
   const reload = () => actionRef.current?.reload();
 
+  const isWebOnlyCapableType = (type?: string) =>
+    webOnlyApplicationTypes.has(String(type || '').toLowerCase());
+
+  const isProxyPublicPortExposed = (record?: API.Proxy) =>
+    Boolean(record?.expose_public_port ?? (record?.port || 0) > 0);
+
+  const isWebOnlyProxy = (record?: API.Proxy) =>
+    Boolean(
+      record &&
+        isWebOnlyCapableType(record.application?.application_type) &&
+        !isProxyPublicPortExposed(record),
+    );
+
+  const renderProtocolTag = (applicationType?: string) => {
+    const type = String(applicationType || '').toLowerCase();
+    if (!type) return '-';
+    return (
+      <Tag color={protocolTagColors[type] || 'default'} bordered={false}>
+        {protocolLabels[type] || type.toUpperCase()}
+      </Tag>
+    );
+  };
+
+  const selectedApplication = selectedApplicationId
+    ? applicationMap.get(selectedApplicationId)
+    : undefined;
+  const selectedApplicationWebOnlyCapable = isWebOnlyCapableType(
+    selectedApplication?.application_type,
+  );
+
   const effectiveStatusMeta = (record: API.Proxy) => {
     const status =
       record.effective_status ||
@@ -481,7 +538,12 @@ const ProxyPage: React.FC = () => {
   };
 
   const handleAdd = async (values: any) => {
-    const createPort = values.port || undefined;
+    const app = applicationMap.get(values.application_id);
+    const webCapable = isWebOnlyCapableType(app?.application_type);
+    const exposePublicPort = webCapable
+      ? Boolean(values.expose_public_port)
+      : true;
+    const createPort = exposePublicPort ? values.port || undefined : 0;
 
     const result = await executeAction(
       () =>
@@ -489,6 +551,7 @@ const ProxyPage: React.FC = () => {
           name: values.name?.trim(),
           description: values.description,
           port: createPort,
+          expose_public_port: exposePublicPort,
           application_id: values.application_id,
         }),
       {
@@ -509,12 +572,19 @@ const ProxyPage: React.FC = () => {
 
   const handleEdit = async (values: any) => {
     if (!currentRow?.id) return false;
+    const webCapable = isWebOnlyCapableType(
+      currentRow.application?.application_type,
+    );
+    const exposePublicPort = webCapable
+      ? Boolean(values.expose_public_port)
+      : true;
     return executeAction(
       () =>
         updateProxy(currentRow.id, {
           name: values.name?.trim(),
           description: values.description,
-          port: values.port,
+          port: exposePublicPort ? values.port : 0,
+          expose_public_port: exposePublicPort,
         }),
       {
         successMessage: tr('更新成功', 'Updated successfully'),
@@ -556,7 +626,20 @@ const ProxyPage: React.FC = () => {
       dataIndex: 'port',
       width: 100,
       search: false,
-      render: (port) => <Tag color="blue">{port}</Tag>,
+      render: (_, record) =>
+        isWebOnlyProxy(record) ? (
+          <Tag color="purple">{tr('仅 Web', 'Web only')}</Tag>
+        ) : (
+          <Tag color="blue">{record.port}</Tag>
+        ),
+    },
+    {
+      title: tr('协议类型', 'Protocol'),
+      dataIndex: ['application', 'application_type'],
+      width: 110,
+      search: false,
+      render: (_, record) =>
+        renderProtocolTag(record.application?.application_type),
     },
     {
       title: tr('关联应用', 'Application'),
@@ -653,6 +736,9 @@ const ProxyPage: React.FC = () => {
       render: (_, record) => {
         const accessUrl = record.access_url;
         const isSSH = record.application?.application_type === 'ssh';
+        const isWebDesktop =
+          record.application?.application_type === 'rdp' ||
+          record.application?.application_type === 'vnc';
         const isActive =
           (record.effective_status ||
             (record.status === 'running' ? 'active' : 'stopped')) === 'active';
@@ -666,12 +752,14 @@ const ProxyPage: React.FC = () => {
 
         return (
           <Space>
-            {isActive && (isSSH || url) && (
+            {isActive && (isSSH || isWebDesktop || url) && (
               <Tooltip
                 title={
                   <span style={{ fontSize: '12px' }}>
                     {isSSH
                       ? tr('在网页终端中打开 SSH', 'Open SSH in web terminal')
+                      : isWebDesktop
+                      ? tr('在网页远程桌面中打开', 'Open in web desktop')
                       : accessUrl}
                   </span>
                 }
@@ -685,6 +773,10 @@ const ProxyPage: React.FC = () => {
                       history.push(`/webssh/${record.id}`);
                       return;
                     }
+                    if (isWebDesktop) {
+                      history.push(`/webdesktop/${record.id}`);
+                      return;
+                    }
                     if (url) {
                       window.open(url, '_blank');
                     }
@@ -694,17 +786,31 @@ const ProxyPage: React.FC = () => {
                 </Button>
               </Tooltip>
             )}
-            <Button
-              type="link"
-              size="small"
-              style={{ padding: 0, height: 'auto' }}
-              onClick={() => openFirewallDrawer(record)}
-            >
-              {tr('防火墙', 'Firewall')}
-            </Button>
+            {isWebOnlyProxy(record) ? (
+              <Tooltip
+                title={tr(
+                  '仅网页访问不创建公网端口，无需入口防火墙',
+                  'Web-only entries do not expose a public port, so entry firewall is not needed',
+                )}
+              >
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {tr('防火墙', 'Firewall')}
+                </Text>
+              </Tooltip>
+            ) : (
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0, height: 'auto' }}
+                onClick={() => openFirewallDrawer(record)}
+              >
+                {tr('防火墙', 'Firewall')}
+              </Button>
+            )}
             <EditLink
               onClick={() => {
                 setCurrentRow(record);
+                setEditExposePublicPort(isProxyPublicPortExposed(record));
                 setEditModalVisible(true);
               }}
             />
@@ -769,8 +875,15 @@ const ProxyPage: React.FC = () => {
           if (!visible) {
             setInitialApplicationId(undefined);
             setSelectedApplicationId(undefined);
+            setCreateExposePublicPort(false);
           } else if (initialApplicationId) {
             setSelectedApplicationId(initialApplicationId);
+            const app = applicationMap.get(initialApplicationId);
+            const expose = !isWebOnlyCapableType(app?.application_type);
+            setCreateExposePublicPort(expose);
+            createFormRef.current?.setFieldsValue?.({
+              expose_public_port: expose,
+            });
           }
         }}
         onFinish={handleAdd}
@@ -802,12 +915,18 @@ const ProxyPage: React.FC = () => {
           fieldProps={{
             onChange: (value: number) => {
               setSelectedApplicationId(value);
+              const app = applicationMap.get(value);
+              const expose = !isWebOnlyCapableType(app?.application_type);
+              setCreateExposePublicPort(expose);
+              createFormRef.current?.setFieldsValue?.({
+                expose_public_port: expose,
+                port: undefined,
+              });
             },
           }}
         />
         {selectedApplicationId &&
-          applicationMap.get(selectedApplicationId)?.application_type ===
-            'http' && (
+          selectedApplication?.application_type === 'http' && (
             <Alert
               message={
                 <span
@@ -845,23 +964,60 @@ const ProxyPage: React.FC = () => {
               style={{ marginBottom: 16, padding: '8px 12px' }}
             />
           )}
-        <ProFormDigit
-          name="port"
-          label={tr('公网端口', 'Public Port')}
-          placeholder={tr('留空自动分配', 'Leave empty for auto allocation')}
-          min={1}
-          max={65535}
-          fieldProps={{ precision: 0 }}
-          rules={[
-            {
-              validator: (_: any, value?: number) => validatePublicPort(value),
-            },
-          ]}
-          extra={tr(
-            '映射到公网的端口号，留空则自动分配',
-            'Mapped public port, empty means auto allocation',
-          )}
-        />
+        {selectedApplicationWebOnlyCapable && (
+          <Alert
+            message={tr(
+              '可独立控制是否开放公网端口',
+              'Public port exposure is controlled separately',
+            )}
+            description={tr(
+              '关闭时只能通过 WebSSH/WebDesktop 访问；开启时会创建公网监听端口，端口留空则自动分配。',
+              'When disabled, access is WebSSH/WebDesktop only. When enabled, a public listener is created; leave the port empty to auto-allocate.',
+            )}
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        {selectedApplicationWebOnlyCapable && (
+          <ProFormSwitch
+            name="expose_public_port"
+            label={tr('开放公网端口', 'Expose Public Port')}
+            initialValue={false}
+            fieldProps={{
+              onChange: (checked) => {
+                setCreateExposePublicPort(Boolean(checked));
+                if (!checked) {
+                  createFormRef.current?.setFieldValue?.('port', undefined);
+                }
+              },
+            }}
+            extra={tr(
+              '关闭后仅允许网页访问，不创建对外监听端口',
+              'Disable to allow web-only access without an external listener',
+            )}
+          />
+        )}
+        {(!selectedApplicationWebOnlyCapable || createExposePublicPort) && (
+          <ProFormDigit
+            name="port"
+            label={tr('公网端口', 'Public Port')}
+            placeholder={tr('留空自动分配', 'Leave empty for auto allocation')}
+            min={1}
+            max={65535}
+            fieldProps={{ precision: 0 }}
+            rules={[
+              {
+                validator: (_: any, value?: number) =>
+                  validatePublicPort(value),
+              },
+            ]}
+            extra={tr(
+              '映射到公网的端口号，留空则自动分配',
+              'Mapped public port, leave empty to auto-allocate',
+            )}
+          />
+        )}
         <ProFormTextArea
           name="description"
           label={tr('描述', 'Description')}
@@ -875,7 +1031,13 @@ const ProxyPage: React.FC = () => {
         onOpenChange={setEditModalVisible}
         onFinish={handleEdit}
         modalProps={{ destroyOnClose: true }}
-        initialValues={currentRow}
+        initialValues={{
+          ...currentRow,
+          port: isProxyPublicPortExposed(currentRow)
+            ? currentRow?.port
+            : undefined,
+          expose_public_port: isProxyPublicPortExposed(currentRow),
+        }}
         width={500}
       >
         <ProFormText
@@ -889,20 +1051,41 @@ const ProxyPage: React.FC = () => {
             },
           ]}
         />
-        <ProFormDigit
-          name="port"
-          label={tr('公网端口', 'Public Port')}
-          placeholder={tr('请输入端口', 'Please input port')}
-          min={1}
-          max={65535}
-          fieldProps={{ precision: 0 }}
-          rules={[
-            {
-              validator: (_: any, value?: number) =>
-                validatePublicPort(value, currentRow?.id),
-            },
-          ]}
-        />
+        {isWebOnlyCapableType(currentRow?.application?.application_type) && (
+          <ProFormSwitch
+            name="expose_public_port"
+            label={tr('开放公网端口', 'Expose Public Port')}
+            fieldProps={{
+              onChange: (checked) => {
+                setEditExposePublicPort(Boolean(checked));
+                if (!checked) {
+                  // 关闭时后端会把端口持久化为 0。
+                }
+              },
+            }}
+            extra={tr(
+              '关闭后只能通过 WebSSH/WebDesktop 访问；开启后可通过公网端口直连',
+              'Disable for WebSSH/WebDesktop-only access; enable to allow direct public-port connections',
+            )}
+          />
+        )}
+        {(!isWebOnlyCapableType(currentRow?.application?.application_type) ||
+          editExposePublicPort) && (
+          <ProFormDigit
+            name="port"
+            label={tr('公网端口', 'Public Port')}
+            placeholder={tr('留空自动分配', 'Leave empty for auto allocation')}
+            min={1}
+            max={65535}
+            fieldProps={{ precision: 0 }}
+            rules={[
+              {
+                validator: (_: any, value?: number) =>
+                  validatePublicPort(value, currentRow?.id),
+              },
+            ]}
+          />
+        )}
         <ProFormTextArea
           name="description"
           label={tr('描述', 'Description')}

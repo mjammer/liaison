@@ -16,6 +16,7 @@ This directory contains systemd service files and installation scripts for the L
 - Linux system with systemd
 - Root privileges
 - Liaison binary compiled and ready
+- WebDesktop support uses `guacd`. `make package` prepares bundled `bin/guacd` plus its runtime from `guacamole/guacd:1.5.5`; `install.sh` uses the bundled runtime first, then falls back to an existing system `guacd`, package-manager install, or Docker sidecar if needed.
 
 ### Quick Installation
 
@@ -104,19 +105,20 @@ However, this is less flexible than using systemd capabilities.
 
 ```bash
 # Start the service
-sudo systemctl start liaison
+sudo systemctl start liaison-guacd frontier liaison
 
 # Stop the service
-sudo systemctl stop liaison
+sudo systemctl stop liaison frontier liaison-guacd
 
 # Restart the service
-sudo systemctl restart liaison
+sudo systemctl restart liaison-guacd frontier liaison
 
 # Check service status
-sudo systemctl status liaison
+sudo systemctl status liaison frontier liaison-guacd
 
 # View service logs
 sudo journalctl -u liaison -f
+sudo journalctl -u liaison-guacd -f
 
 # Enable service to start on boot
 sudo systemctl enable liaison
@@ -162,6 +164,9 @@ manager:
     tls:
       enable: false
   db: /opt/liaison/data/liaison.db
+  guacd_addr: 127.0.0.1:4822
+  guacd_bridge_addr: 127.0.0.1:0
+  guacd_bridge_host: 127.0.0.1
 frontier:
   controlplane_url: http://127.0.0.1:30010
   dial:
@@ -176,6 +181,8 @@ log:
   maxsize: 100
   maxrolls: 10
 ```
+
+`guacd` is intentionally bound to loopback in the generated service so it is not exposed publicly. The installer prefers the bundled `/opt/liaison/bin/guacd` wrapper and `/opt/liaison/guacd-rootfs` runtime. If they are missing, the installer tries an existing system `guacd`, package-manager install, then a Docker sidecar using host networking and the same loopback bind. Liaison still starts if guacd cannot be installed; only WebDesktop is unavailable until guacd is installed.
 
 ## Security Features
 

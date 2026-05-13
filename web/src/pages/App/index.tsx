@@ -5,6 +5,7 @@ import {
   createProxy,
   deleteApplication,
   getApplicationList,
+  getDeviceDetail,
   getDeviceList,
   getEdgeList,
   getProxyList,
@@ -28,13 +29,27 @@ import {
   ProColumns,
   ProFormDigit,
   ProFormSelect,
+  ProFormSwitch,
   ProFormText,
   ProTable,
 } from '@ant-design/pro-components';
-import { Alert, Form, Space, Tag, Typography } from 'antd';
+import { Alert, AutoComplete, Form, Space, Tag, Typography } from 'antd';
 import { useRef, useState } from 'react';
 
 const { Text } = Typography;
+
+const webOnlyApplicationTypes = new Set(['ssh', 'rdp', 'vnc']);
+
+type SelectOption = {
+  label: string;
+  value: string;
+};
+
+type EdgeOption = {
+  label: string;
+  value: number;
+  deviceId?: number;
+};
 
 const AppPage: React.FC = () => {
   const { tr } = useI18n();
@@ -45,14 +60,60 @@ const AppPage: React.FC = () => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [proxyModalVisible, setProxyModalVisible] = useState(false);
   const [currentRow, setCurrentRow] = useState<API.Application>();
+  const [proxyExposePublicPort, setProxyExposePublicPort] = useState(false);
   const [selectedApplicationType, setSelectedApplicationType] = useState<
     string | undefined
   >();
+  const [selectedCreateEdgeId, setSelectedCreateEdgeId] = useState<
+    number | undefined
+  >();
+  const [applicationIpOptions, setApplicationIpOptions] = useState<
+    SelectOption[]
+  >([]);
+  const [applicationIpDropdownOpen, setApplicationIpDropdownOpen] =
+    useState(false);
+  const suppressNextIpDropdownOpenRef = useRef(false);
   const [deviceOptions, setDeviceOptions] = useState<
     { label: string; value: string }[]
   >([]);
 
   const reload = () => actionRef.current?.reload();
+
+  const isWebOnlyCapableType = (type?: string) =>
+    webOnlyApplicationTypes.has(String(type || '').toLowerCase());
+
+  const normalizeInterfaceIP = (ip?: string) => {
+    const value = String(ip || '').trim();
+    if (!value) return '';
+    return value.split('/')[0].trim();
+  };
+
+  const buildDeviceIpOptions = (device?: API.Device): SelectOption[] => {
+    const seen = new Set<string>();
+    const options: SelectOption[] = [];
+    const deviceName = device?.name?.trim();
+    for (const iface of device?.interfaces || []) {
+      const ips = [...(iface.ip || []), ...(iface.ipv4 || [])];
+      for (const rawIP of ips) {
+        const ip = normalizeInterfaceIP(rawIP);
+        if (!ip || ip.includes(':') || seen.has(ip)) continue;
+        seen.add(ip);
+        const interfaceText = iface.name ? ` (${iface.name})` : '';
+        options.push({
+          label: deviceName
+            ? `${deviceName} - ${ip}${interfaceText}`
+            : `${ip}${interfaceText}`,
+          value: ip,
+        });
+      }
+    }
+    return options;
+  };
+
+  const formatEntryPort = (proxy?: API.Proxy, applicationType?: string) =>
+    proxy && proxy.port === 0 && isWebOnlyCapableType(applicationType)
+      ? tr('仅 Web', 'Web only')
+      : proxy?.port;
 
   const isValidIPv4Address = (value: string): boolean => {
     const parts = value.split('.');
@@ -134,6 +195,38 @@ const AppPage: React.FC = () => {
     }
   };
 
+  const loadCreateEdgeOptions = async (): Promise<EdgeOption[]> => {
+    try {
+      const res = await getEdgeList({ page_size: 100 });
+      const edges = res.data?.edges || [];
+      return edges.map((item: API.Edge) => ({
+        label: item.device?.name
+          ? `${item.name} (${item.device.name})`
+          : item.name,
+        value: item.id,
+        deviceId: item.device?.id,
+      }));
+    } catch {
+      return [];
+    }
+  };
+
+  const loadCreateEdgeDeviceIps = async (deviceID?: number) => {
+    setApplicationIpOptions([]);
+    setApplicationIpDropdownOpen(false);
+    if (!deviceID) return;
+
+    try {
+      const res = await getDeviceDetail(deviceID);
+      const options = buildDeviceIpOptions(res.data);
+      setApplicationIpOptions(options);
+      setApplicationIpDropdownOpen(false);
+    } catch {
+      setApplicationIpOptions([]);
+      setApplicationIpDropdownOpen(false);
+    }
+  };
+
   const handleAdd = async (values: any) => {
     return executeAction(
       () =>
@@ -181,7 +274,11 @@ const AppPage: React.FC = () => {
 
   const handleCreateProxy = async (values: any) => {
     if (!currentRow?.id) return false;
-    const createPort = values.port || undefined;
+    const webCapable = isWebOnlyCapableType(currentRow.application_type);
+    const exposePublicPort = webCapable
+      ? Boolean(values.expose_public_port)
+      : true;
+    const createPort = exposePublicPort ? values.port || undefined : 0;
     let createdProxy: API.Proxy | null = null;
 
     const result = await executeAction(
@@ -190,6 +287,7 @@ const AppPage: React.FC = () => {
           name: values.name?.trim() || currentRow.name,
           description: values.description,
           port: createPort,
+          expose_public_port: exposePublicPort,
           application_id: currentRow.id,
         }),
       {
@@ -237,6 +335,7 @@ const AppPage: React.FC = () => {
         tcp: { text: 'TCP' },
         ssh: { text: 'SSH' },
         rdp: { text: 'RDP' },
+        vnc: { text: 'VNC' },
         mysql: { text: 'MySQL' },
         postgresql: { text: 'PostgreSQL' },
         redis: { text: 'Redis' },
@@ -309,7 +408,8 @@ const AppPage: React.FC = () => {
         if (record.proxy) {
           return (
             <Tag color="blue">
-              <LinkOutlined /> {record.proxy.name}:{record.proxy.port}
+              <LinkOutlined /> {record.proxy.name}:
+              {formatEntryPort(record.proxy, record.application_type)}
             </Tag>
           );
         }
@@ -334,6 +434,9 @@ const AppPage: React.FC = () => {
           <a
             onClick={() => {
               setCurrentRow(record);
+              setProxyExposePublicPort(
+                !isWebOnlyCapableType(record.application_type),
+              );
               setProxyModalVisible(true);
             }}
           >
@@ -410,6 +513,10 @@ const AppPage: React.FC = () => {
           setCreateModalVisible(visible);
           if (!visible) {
             setSelectedApplicationType(undefined);
+            setSelectedCreateEdgeId(undefined);
+            setApplicationIpOptions([]);
+            setApplicationIpDropdownOpen(false);
+            createForm.resetFields();
           }
         }}
         onFinish={handleAdd}
@@ -429,6 +536,34 @@ const AppPage: React.FC = () => {
           ]}
         />
         <ProFormSelect
+          name="edge_id"
+          label={tr('连接器', 'Edge')}
+          placeholder={tr('请先选择连接器', 'Select an edge first')}
+          rules={[
+            {
+              required: true,
+              message: tr('请选择连接器', 'Please select edge'),
+            },
+          ]}
+          request={loadCreateEdgeOptions}
+          fieldProps={{
+            showSearch: true,
+            optionFilterProp: 'label',
+            onChange: (value, option) => {
+              const edgeID = Number(value) || undefined;
+              const optionItem = Array.isArray(option) ? option[0] : option;
+              const deviceID = Number((optionItem as EdgeOption)?.deviceId);
+              setSelectedCreateEdgeId(edgeID);
+              createForm.setFieldsValue({ ip: undefined });
+              void loadCreateEdgeDeviceIps(deviceID || undefined);
+            },
+          }}
+          extra={tr(
+            '选择后，IP 输入框会列出该连接器所在设备的网卡 IP',
+            'After selection, the IP field lists interface IPs from that edge device',
+          )}
+        />
+        <ProFormSelect
           name="application_type"
           label={tr('应用类型', 'Application Type')}
           placeholder={tr(
@@ -440,6 +575,7 @@ const AppPage: React.FC = () => {
             { label: 'TCP', value: 'tcp' },
             { label: 'SSH', value: 'ssh' },
             { label: 'RDP', value: 'rdp' },
+            { label: 'VNC', value: 'vnc' },
             { label: 'MySQL', value: 'mysql' },
             { label: 'PostgreSQL', value: 'postgresql' },
             { label: 'Redis', value: 'redis' },
@@ -454,6 +590,7 @@ const AppPage: React.FC = () => {
                 http: 80,
                 ssh: 22,
                 rdp: 3389,
+                vnc: 5900,
                 mysql: 3306,
                 postgresql: 5432,
                 redis: 6379,
@@ -506,13 +643,9 @@ const AppPage: React.FC = () => {
             descriptionStyle={{ marginTop: 0 }}
           />
         )}
-        <ProFormText
+        <Form.Item
           name="ip"
           label={tr('IP 地址', 'IP Address')}
-          placeholder={tr(
-            '请输入应用 IP 地址，如 192.168.1.100',
-            'Please input application IP, e.g. 192.168.1.100',
-          )}
           rules={[
             {
               required: true,
@@ -536,7 +669,67 @@ const AppPage: React.FC = () => {
               },
             },
           ]}
-        />
+          extra={tr(
+            '可从当前设备 IP 中选择，也可以直接输入 IP、localhost 或主机名',
+            'Select a current device IP or type an IP, localhost, or hostname',
+          )}
+        >
+          <AutoComplete
+            allowClear
+            disabled={!selectedCreateEdgeId}
+            open={
+              Boolean(selectedCreateEdgeId) &&
+              applicationIpOptions.length > 0 &&
+              applicationIpDropdownOpen
+            }
+            options={applicationIpOptions}
+            placeholder={
+              selectedCreateEdgeId
+                ? tr(
+                    '选择当前设备 IP，或直接输入',
+                    'Select a device IP or type one',
+                  )
+                : tr('请先选择连接器', 'Select an edge first')
+            }
+            filterOption={(input, option) => {
+              const text = `${option?.label ?? ''} ${option?.value ?? ''}`;
+              return text.toLowerCase().includes(input.toLowerCase());
+            }}
+            onFocus={() => {
+              if (
+                applicationIpOptions.length > 0 &&
+                !suppressNextIpDropdownOpenRef.current
+              ) {
+                setApplicationIpDropdownOpen(true);
+              }
+            }}
+            onClick={() => {
+              if (
+                applicationIpOptions.length > 0 &&
+                !suppressNextIpDropdownOpenRef.current
+              ) {
+                setApplicationIpDropdownOpen(true);
+              }
+            }}
+            onBlur={() => {
+              window.setTimeout(() => setApplicationIpDropdownOpen(false), 100);
+            }}
+            onOpenChange={(open) => {
+              if (open && suppressNextIpDropdownOpenRef.current) {
+                return;
+              }
+              setApplicationIpDropdownOpen(Boolean(open));
+            }}
+            onSelect={() => {
+              suppressNextIpDropdownOpenRef.current = true;
+              setApplicationIpDropdownOpen(false);
+              createForm.validateFields(['ip']).catch(() => undefined);
+              window.setTimeout(() => {
+                suppressNextIpDropdownOpenRef.current = false;
+              }, 120);
+            }}
+          />
+        </Form.Item>
         <ProFormDigit
           name="port"
           label={tr('端口', 'Port')}
@@ -576,30 +769,6 @@ const AppPage: React.FC = () => {
             },
           ]}
         />
-        <ProFormSelect
-          name="edge_id"
-          label={tr('连接器', 'Edge')}
-          placeholder={tr('请选择连接器', 'Please select edge')}
-          rules={[
-            {
-              required: true,
-              message: tr('请选择连接器', 'Please select edge'),
-            },
-          ]}
-          request={async () => {
-            try {
-              const res = await getEdgeList({ page_size: 100 });
-              return (
-                res.data?.edges?.map((item: API.Edge) => ({
-                  label: item.name,
-                  value: item.id,
-                })) || []
-              );
-            } catch {
-              return [];
-            }
-          }}
-        />
       </ModalForm>
 
       <ModalForm
@@ -627,9 +796,15 @@ const AppPage: React.FC = () => {
       <ModalForm
         title={tr('为应用创建访问', 'Create Entry for Application')}
         open={proxyModalVisible}
-        onOpenChange={setProxyModalVisible}
+        onOpenChange={(visible) => {
+          setProxyModalVisible(visible);
+          if (!visible) {
+            setProxyExposePublicPort(false);
+          }
+        }}
         onFinish={handleCreateProxy}
         modalProps={{ destroyOnClose: true }}
+        initialValues={{ expose_public_port: false }}
         width={500}
       >
         <ProFormText
@@ -684,23 +859,56 @@ const AppPage: React.FC = () => {
             descriptionStyle={{ marginTop: 0 }}
           />
         )}
-        <ProFormDigit
-          name="port"
-          label={tr('公网端口', 'Public Port')}
-          placeholder={tr('留空自动分配', 'Leave empty for auto allocation')}
-          min={1}
-          max={65535}
-          fieldProps={{ precision: 0 }}
-          rules={[
-            {
-              validator: (_: any, value?: number) => validatePublicPort(value),
-            },
-          ]}
-          extra={tr(
-            '映射到公网的端口号，留空则自动分配',
-            'Mapped public port, empty means auto allocation',
-          )}
-        />
+        {isWebOnlyCapableType(currentRow?.application_type) && (
+          <Alert
+            message={tr(
+              '可独立控制是否开放公网端口',
+              'Public port exposure is controlled separately',
+            )}
+            description={tr(
+              '关闭时只能通过 WebSSH/WebDesktop 访问；开启时会创建公网监听端口，端口留空则自动分配。',
+              'When disabled, access is WebSSH/WebDesktop only. When enabled, a public listener is created; leave the port empty to auto-allocate.',
+            )}
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        {isWebOnlyCapableType(currentRow?.application_type) && (
+          <ProFormSwitch
+            name="expose_public_port"
+            label={tr('开放公网端口', 'Expose Public Port')}
+            initialValue={false}
+            fieldProps={{
+              onChange: (checked) => setProxyExposePublicPort(Boolean(checked)),
+            }}
+            extra={tr(
+              '关闭后仅允许网页访问，不创建对外监听端口',
+              'Disable to allow web-only access without an external listener',
+            )}
+          />
+        )}
+        {(!isWebOnlyCapableType(currentRow?.application_type) ||
+          proxyExposePublicPort) && (
+          <ProFormDigit
+            name="port"
+            label={tr('公网端口', 'Public Port')}
+            placeholder={tr('留空自动分配', 'Leave empty for auto allocation')}
+            min={1}
+            max={65535}
+            fieldProps={{ precision: 0 }}
+            rules={[
+              {
+                validator: (_: any, value?: number) =>
+                  validatePublicPort(value),
+              },
+            ]}
+            extra={tr(
+              '映射到公网的端口号，留空则自动分配',
+              'Mapped public port, leave empty to auto-allocate',
+            )}
+          />
+        )}
         <ProFormText
           name="description"
           label={tr('描述', 'Description')}

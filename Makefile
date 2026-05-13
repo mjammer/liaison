@@ -49,7 +49,7 @@
 #      - make build-web            # 构建前端到 web/dist
 #
 #   9. 完整打包
-#      - make package               # 打包完整的 Liaison 安装包（Linux）
+#      - make package               # 打包完整的 Liaison 安装包（Linux，自动准备 guacd runtime）
 #                                    包含：
 #                                    - liaison (Linux amd64)
 #                                    - liaison-edge (所有平台：linux-amd64, linux-arm64,
@@ -67,7 +67,7 @@
 #      - make compose-logs           # 跟踪两个服务的日志
 #      - make package-docker         # 输出离线分发包
 #                                    liaison-<VERSION>-docker-amd64.tar.gz 含：
-#                                    - images/{liaison,frontier}.tar（docker save）
+#                                    - images/{liaison,frontier,guacd}.tar（docker save）
 #                                    - docker-compose.yaml（release 版，无 build: 段）
 #                                    - .env.example（预钉镜像 tag）
 #                                    - load.sh / README.md
@@ -100,6 +100,9 @@ DOCKER_BASE = docker run --rm $(DOCKER_VOLUME) $(DOCKER_WORKDIR)
 DOCKER_HOST_UID := $(shell id -u 2>/dev/null || echo 0)
 DOCKER_HOST_GID := $(shell id -g 2>/dev/null || echo 0)
 GO_BUILD_FLAGS = -trimpath -buildvcs=false -ldflags '-s -w'
+GUACD_IMAGE ?= guacamole/guacd:1.5.5
+GUACD_CONTAINER_BINARY ?= /opt/guacamole/sbin/guacd
+GUACD_RUNTIME_DIR ?= ./bin/guacd-rootfs
 
 # Ensure Docker image exists (pull only if not present locally)
 .PHONY: docker-image
@@ -229,14 +232,59 @@ build-edge-linux: docker-image
 .PHONY: build-frontier-linux
 build-frontier-linux:
 	@mkdir -p ./bin
-	@if [ -f "./bin/frontier" ]; then \
-		echo "✅ frontier binary already exists, skipping download"; \
+	@if [ -f "./bin/frontier" ] && command -v file >/dev/null 2>&1 && file ./bin/frontier | grep -Eq 'ELF 64-bit.*(x86-64|x86_64)'; then \
+		echo "✅ frontier linux-amd64 binary already exists, skipping download"; \
 	else \
 		echo "Downloading frontier-linux-amd64 from GitHub releases..."; \
+		rm -f ./bin/frontier; \
 		curl -L -o ./bin/frontier https://github.com/singchia/frontier/releases/download/v1.2.4/frontier-linux-amd64 && \
 		chmod +x ./bin/frontier && \
 		echo "✅ Downloaded: ./bin/frontier"; \
 	fi
+
+.PHONY: prepare-guacd-linux
+prepare-guacd-linux:
+	@set -e; \
+	mkdir -p ./bin; \
+	if [ -x "./bin/guacd" ] && [ -s "$(GUACD_RUNTIME_DIR)$(GUACD_CONTAINER_BINARY)" ] && [ -s "$(GUACD_RUNTIME_DIR)/lib/ld-musl-x86_64.so.1" ]; then \
+		echo "✅ guacd runtime already exists, skipping download"; \
+		exit 0; \
+	fi; \
+	if ! command -v docker >/dev/null 2>&1; then \
+		echo "❌ Error: Docker is required to prepare bundled guacd. Install Docker or place ./bin/guacd and $(GUACD_RUNTIME_DIR) manually."; \
+		exit 1; \
+	fi; \
+	echo "Preparing bundled guacd linux/amd64 runtime from $(GUACD_IMAGE)..."; \
+	rm -rf "$(GUACD_RUNTIME_DIR)" "./bin/guacd"; \
+	mkdir -p "$(GUACD_RUNTIME_DIR)/opt" "$(GUACD_RUNTIME_DIR)/usr"; \
+	image_arch=$$(docker image inspect --format '{{.Architecture}}' "$(GUACD_IMAGE)" 2>/dev/null || true); \
+	if [ "$$image_arch" = "amd64" ]; then \
+		echo "✅ Docker image $(GUACD_IMAGE) already exists locally for amd64"; \
+	else \
+		echo "📥 Pulling Docker image $(GUACD_IMAGE) for linux/amd64..."; \
+		docker pull --platform linux/amd64 "$(GUACD_IMAGE)"; \
+	fi; \
+	tmp_tar="./bin/guacd-rootfs.tar"; \
+	rm -f "$$tmp_tar"; \
+	docker run --rm --user 0 --platform linux/amd64 --entrypoint sh "$(GUACD_IMAGE)" -c 'cd / && tar -cf - opt/guacamole lib usr/lib' > "$$tmp_tar"; \
+	tar -C "$(GUACD_RUNTIME_DIR)" -xf "$$tmp_tar"; \
+	rm -f "$$tmp_tar"; \
+	perl -0pi -e 's|\Q/opt/guacamole/lib\E|/opt/liaison/guacd|g' "$(GUACD_RUNTIME_DIR)$(GUACD_CONTAINER_BINARY)"; \
+	printf '%s\n' \
+		'#!/bin/sh' \
+		'set -e' \
+		'ROOT="$${LIAISON_GUACD_ROOT:-/opt/liaison/guacd-rootfs}"' \
+		'PLUGIN_DIR="$${LIAISON_GUACD_PLUGIN_DIR:-/opt/liaison/guacd}"' \
+		'export LD_LIBRARY_PATH="$${PLUGIN_DIR}:$${PLUGIN_DIR}/freerdp2:$${ROOT}/opt/guacamole/lib:$${ROOT}/lib:$${ROOT}/usr/lib:$${ROOT}/usr/lib/pulseaudio$${LD_LIBRARY_PATH:+:$${LD_LIBRARY_PATH}}"' \
+		'export FREERDP2_PLUGIN_PATH="$${PLUGIN_DIR}/freerdp2"' \
+		'exec "$${ROOT}/lib/ld-musl-x86_64.so.1" --library-path "$${LD_LIBRARY_PATH}" "$${ROOT}/opt/guacamole/sbin/guacd" "$$@"' \
+		> ./bin/guacd; \
+	chmod +x ./bin/guacd "$(GUACD_RUNTIME_DIR)$(GUACD_CONTAINER_BINARY)"; \
+	find "$(GUACD_RUNTIME_DIR)" -name '._*' -delete 2>/dev/null || true; \
+	test -s ./bin/guacd; \
+	test -s "$(GUACD_RUNTIME_DIR)$(GUACD_CONTAINER_BINARY)"; \
+	test -s "$(GUACD_RUNTIME_DIR)/lib/ld-musl-x86_64.so.1"; \
+	echo "✅ Prepared: ./bin/guacd + $(GUACD_RUNTIME_DIR)"
 
 # Legacy aliases
 .PHONY: liaison-linux liaison-edge-linux
@@ -477,7 +525,7 @@ build-web:
 # Full package (liaison + edge binaries for all platforms + frontend + systemd files)
 # ============================================================================
 .PHONY: package
-package: build-linux build-edge-all package-edge-all build-web build-tools-linux
+package: build-linux build-edge-all package-edge-all build-web build-tools-linux prepare-guacd-linux
 	@chmod +x dist/package.sh
 	@./dist/package.sh
 
@@ -494,6 +542,7 @@ pack: package
 DOCKER_COMPOSE_DIR = deploy/docker
 LIAISON_IMAGE_REGISTRY ?= liaison
 LIAISON_IMAGE_TAG ?= $(shell cat VERSION 2>/dev/null | tr -d 'v' || echo latest)
+DOCKER_IMAGE_PLATFORM ?= linux/amd64
 
 .PHONY: image-liaison
 image-liaison:
@@ -501,13 +550,29 @@ image-liaison:
 		echo "❌ Missing artifacts. Run 'make package' first."; \
 		exit 1; \
 	fi
-	docker build -t $(LIAISON_IMAGE_REGISTRY)/liaison:$(LIAISON_IMAGE_TAG) \
+	@if command -v file >/dev/null 2>&1; then \
+		for binary in bin/liaison bin/password-generator; do \
+			file "$$binary" | grep -Eq 'ELF 64-bit.*(x86-64|x86_64)' || { \
+				echo "❌ $$binary must be a Linux amd64 binary. Run 'make package' first."; \
+				exit 1; \
+			}; \
+		done; \
+	fi
+	docker build --platform $(DOCKER_IMAGE_PLATFORM) \
+		-t $(LIAISON_IMAGE_REGISTRY)/liaison:$(LIAISON_IMAGE_TAG) \
 		-f $(DOCKER_COMPOSE_DIR)/Dockerfile.liaison .
 	@echo "✅ Built $(LIAISON_IMAGE_REGISTRY)/liaison:$(LIAISON_IMAGE_TAG)"
 
 .PHONY: image-frontier
 image-frontier: build-frontier-linux
-	docker build -t $(LIAISON_IMAGE_REGISTRY)/frontier:$(LIAISON_IMAGE_TAG) \
+	@if command -v file >/dev/null 2>&1; then \
+		file bin/frontier | grep -Eq 'ELF 64-bit.*(x86-64|x86_64)' || { \
+			echo "❌ bin/frontier must be a Linux amd64 binary. Run 'make build-frontier-linux' first."; \
+			exit 1; \
+		}; \
+	fi
+	docker build --platform $(DOCKER_IMAGE_PLATFORM) \
+		-t $(LIAISON_IMAGE_REGISTRY)/frontier:$(LIAISON_IMAGE_TAG) \
 		-f $(DOCKER_COMPOSE_DIR)/Dockerfile.frontier .
 	@echo "✅ Built $(LIAISON_IMAGE_REGISTRY)/frontier:$(LIAISON_IMAGE_TAG)"
 

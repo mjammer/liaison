@@ -112,6 +112,7 @@ jobs:
           make package-edge-linux-amd64 package-edge-linux-arm64 package-edge-windows-amd64
           make build-web
           make build-tools-linux
+          make prepare-guacd-linux
 
       - name: Download macOS edge packages
         uses: actions/download-artifact@v4
