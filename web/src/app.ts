@@ -1,5 +1,5 @@
 import { history, RequestConfig } from '@umijs/max';
-import { ConfigProvider, Dropdown, message, Typography, Tooltip } from 'antd';
+import { ConfigProvider, Dropdown, message, Typography } from 'antd';
 import { LogoutOutlined, SettingOutlined, BugOutlined, GlobalOutlined } from '@ant-design/icons';
 import React from 'react';
 import enUS from 'antd/locale/en_US';
@@ -349,61 +349,6 @@ export const layout = ({ initialState }: any) => {
               },
             }),
             React.createElement('span', null, 'Github')
-          ),
-          React.createElement(
-            Tooltip,
-            {
-              title: React.createElement('img', {
-                src: '/wechat.png',
-                alt: tr('微信二维码', 'WeChat QR Code'),
-                style: {
-                  width: 200,
-                  height: 200,
-                  display: 'block',
-                },
-              }),
-              placement: 'top',
-              overlayStyle: {
-                padding: 0,
-              },
-              overlayInnerStyle: {
-                padding: 8,
-                backgroundColor: '#fff',
-                borderRadius: 8,
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-              },
-            },
-            React.createElement(
-              'div',
-              {
-                style: {
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  cursor: 'pointer',
-                  color: 'rgba(0, 0, 0, 0.45)',
-                  fontSize: 13,
-                },
-              },
-              React.createElement('img', {
-                src: '/wechat.svg',
-                alt: 'WeChat',
-                style: {
-                  width: 18,
-                  height: 18,
-                  verticalAlign: 'middle',
-                  opacity: 0.7,
-                  transition: 'opacity 0.3s',
-                },
-                onMouseEnter: (e: any) => {
-                  e.currentTarget.style.opacity = '1';
-                },
-                onMouseLeave: (e: any) => {
-                  e.currentTarget.style.opacity = '0.7';
-                },
-              }),
-              React.createElement('span', null, 'WeChat')
-            )
           )
         )
       );

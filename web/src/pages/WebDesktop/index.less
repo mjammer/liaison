@@ -68,27 +68,6 @@ body.webdesktop-page-active .ant-pro-page-container-children-container {
   background: #111827;
 }
 
-.webdesktop-display::after {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  color: rgba(226, 232, 240, 0.16);
-  content: attr(data-watermark);
-  font-size: clamp(22px, 4vw, 58px);
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1.2;
-  pointer-events: none;
-  text-align: center;
-  transform: rotate(-18deg);
-  user-select: none;
-  white-space: pre-wrap;
-}
-
 .webdesktop-display:fullscreen {
   display: flex;
   width: 100vw;
@@ -111,8 +90,14 @@ body.webdesktop-page-active .ant-pro-page-container-children-container {
   background: #000000;
 }
 
-.webdesktop-display > div {
-  margin: 0 auto;
+.webdesktop-display-stage {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
 .webdesktop-native-display {
