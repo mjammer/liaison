@@ -1,3 +1,7 @@
+import SessionWatermark, {
+  buildSessionWatermarkLabel,
+  useSessionWatermarkTime,
+} from '@/components/SessionWatermark';
 import { useI18n } from '@/i18n';
 import {
   createWebDesktopSession,
@@ -12,7 +16,7 @@ import {
   SendOutlined,
 } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
-import { useParams } from '@umijs/max';
+import { useModel, useParams } from '@umijs/max';
 import {
   Alert,
   AutoComplete,
@@ -38,6 +42,7 @@ const credentialKey = (username?: string, domain?: string) =>
 
 const WebDesktopPage: React.FC = () => {
   const { tr } = useI18n();
+  const { initialState } = useModel('@@initialState');
   const params = useParams();
   const proxyId = Number(params.proxyId);
   const [form] = Form.useForm<API.CreateWebDesktopSessionRequest>();
@@ -50,6 +55,7 @@ const WebDesktopPage: React.FC = () => {
   const [fullscreen, setFullscreen] = useState(false);
   const [error, setError] = useState('');
   const displayHostRef = useRef<HTMLDivElement | null>(null);
+  const displayContentRef = useRef<HTMLDivElement | null>(null);
   const clientRef = useRef<any>();
   const tunnelRef = useRef<any>();
   const keyboardRef = useRef<any>();
@@ -73,11 +79,24 @@ const WebDesktopPage: React.FC = () => {
         : item.username || '';
     return { label, value: key };
   });
-  const watermarkText = target
-    ? `WebDesktop · ${target.protocol.toUpperCase()} · ${target.proxy_name} · ${
-        target.application_name
-      } · ${target.target_host}:${target.target_port}`
-    : 'WebDesktop';
+  const watermarkTime = useSessionWatermarkTime();
+  const watermarkUser =
+    initialState?.currentUser?.email ||
+    initialState?.currentUser?.name ||
+    tr('未知用户', 'Unknown user');
+  const watermarkLines = target
+    ? [
+        buildSessionWatermarkLabel([
+          watermarkUser,
+          target.protocol.toUpperCase(),
+          target.proxy_name,
+        ]),
+        watermarkTime,
+      ]
+    : [
+        buildSessionWatermarkLabel([watermarkUser, 'WebDesktop']),
+        watermarkTime,
+      ];
 
   const cleanupConnection = useCallback(
     (close = false, clearDisplay = false) => {
@@ -99,8 +118,8 @@ const WebDesktopPage: React.FC = () => {
         client?.disconnect?.();
         tunnel?.disconnect?.();
       }
-      if (clearDisplay && displayHostRef.current) {
-        displayHostRef.current.innerHTML = '';
+      if (clearDisplay && displayContentRef.current) {
+        displayContentRef.current.innerHTML = '';
       }
       setConnected(false);
       setConnecting(false);
@@ -113,7 +132,7 @@ const WebDesktopPage: React.FC = () => {
   }, [cleanupConnection]);
 
   const focusRemoteCanvas = useCallback(() => {
-    const canvas = displayHostRef.current?.querySelector<HTMLCanvasElement>(
+    const canvas = displayContentRef.current?.querySelector<HTMLCanvasElement>(
       '.webdesktop-input-plane',
     );
     canvas?.focus({ preventScroll: true });
@@ -241,7 +260,13 @@ const WebDesktopPage: React.FC = () => {
   };
 
   const connect = async (values: API.CreateWebDesktopSessionRequest) => {
-    if (!target || !active || !displayHostRef.current) return;
+    if (
+      !target ||
+      !active ||
+      !displayHostRef.current ||
+      !displayContentRef.current
+    )
+      return;
     disconnect();
     setConnecting(true);
     setError('');
@@ -280,9 +305,9 @@ const WebDesktopPage: React.FC = () => {
       inputPlane.className = 'webdesktop-input-plane';
       inputPlane.tabIndex = 0;
       displayElement.classList.add('webdesktop-native-display');
-      displayHostRef.current.innerHTML = '';
-      displayHostRef.current.appendChild(displayElement);
-      displayHostRef.current.appendChild(inputPlane);
+      displayContentRef.current.innerHTML = '';
+      displayContentRef.current.appendChild(displayElement);
+      displayContentRef.current.appendChild(inputPlane);
 
       const fitDisplayToHost = () => {
         const host = displayHostRef.current;
@@ -679,11 +704,10 @@ const WebDesktopPage: React.FC = () => {
           </Form>
         </div>
 
-        <div
-          className="webdesktop-display"
-          data-watermark={watermarkText}
-          ref={displayHostRef}
-        />
+        <div className="webdesktop-display" ref={displayHostRef}>
+          <div className="webdesktop-display-stage" ref={displayContentRef} />
+          <SessionWatermark lines={watermarkLines} />
+        </div>
       </div>
     </PageContainer>
   );

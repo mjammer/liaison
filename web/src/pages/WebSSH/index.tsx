@@ -1,3 +1,7 @@
+import SessionWatermark, {
+  buildSessionWatermarkLabel,
+  useSessionWatermarkTime,
+} from '@/components/SessionWatermark';
 import { useI18n } from '@/i18n';
 import {
   createWebSSHSession,
@@ -14,7 +18,7 @@ import {
   SendOutlined,
 } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
-import { useParams } from '@umijs/max';
+import { useModel, useParams } from '@umijs/max';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
@@ -48,6 +52,7 @@ const isTerminalAtBottom = (terminal?: Terminal) => {
 
 const WebSSHPage: React.FC = () => {
   const { tr } = useI18n();
+  const { initialState } = useModel('@@initialState');
   const params = useParams();
   const proxyId = Number(params.proxyId);
   const [form] = Form.useForm<API.CreateWebSSHSessionRequest>();
@@ -83,9 +88,17 @@ const WebSSHPage: React.FC = () => {
     label: item.username,
     value: item.username,
   }));
-  const watermarkText = target
-    ? `WebSSH · ${target.proxy_name} · ${target.application_name} · ${target.target_host}:${target.target_port}`
-    : 'WebSSH';
+  const watermarkTime = useSessionWatermarkTime();
+  const watermarkUser =
+    initialState?.currentUser?.email ||
+    initialState?.currentUser?.name ||
+    tr('未知用户', 'Unknown user');
+  const watermarkLines = target
+    ? [
+        buildSessionWatermarkLabel([watermarkUser, 'SSH', target.proxy_name]),
+        watermarkTime,
+      ]
+    : [buildSessionWatermarkLabel([watermarkUser, 'SSH']), watermarkTime];
 
   const flushTerminalInput = useCallback(() => {
     inputFlushQueuedRef.current = false;
@@ -747,13 +760,13 @@ const WebSSHPage: React.FC = () => {
           </div>
           <div
             className="webssh-terminal"
-            data-watermark={watermarkText}
             ref={terminalFrameRef}
             tabIndex={0}
             onClick={focusTerminal}
             onMouseDown={focusTerminal}
           >
             <div className="webssh-terminal-screen" ref={terminalHostRef} />
+            <SessionWatermark lines={watermarkLines} />
           </div>
         </div>
       </div>
