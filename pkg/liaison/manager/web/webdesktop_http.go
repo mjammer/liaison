@@ -66,6 +66,7 @@ type webDesktopSession struct {
 type webDesktopSessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]*webDesktopSession
+	active   map[uint]map[string]context.CancelFunc
 }
 
 type guacInstruction struct {
@@ -75,7 +76,10 @@ type guacInstruction struct {
 }
 
 func newWebDesktopSessionStore() *webDesktopSessionStore {
-	return &webDesktopSessionStore{sessions: map[string]*webDesktopSession{}}
+	return &webDesktopSessionStore{
+		sessions: map[string]*webDesktopSession{},
+		active:   map[uint]map[string]context.CancelFunc{},
+	}
 }
 
 func (s *webDesktopSessionStore) create(userID, proxyID uint, protocol, username, domain string, password []byte, width, height, dpi int, saveCredential, savedCredential bool) (*webDesktopSession, error) {
@@ -127,6 +131,50 @@ func (s *webDesktopSessionStore) cleanupLocked(now time.Time) {
 			delete(s.sessions, token)
 			session.zero()
 		}
+	}
+}
+
+func (s *webDesktopSessionStore) registerActive(proxyID uint, token string, cancel context.CancelFunc) func() {
+	if cancel == nil {
+		return func() {}
+	}
+	s.mu.Lock()
+	if s.active[proxyID] == nil {
+		s.active[proxyID] = map[string]context.CancelFunc{}
+	}
+	s.active[proxyID][token] = cancel
+	s.mu.Unlock()
+
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if sessions := s.active[proxyID]; sessions != nil {
+			delete(sessions, token)
+			if len(sessions) == 0 {
+				delete(s.active, proxyID)
+			}
+		}
+	}
+}
+
+func (s *webDesktopSessionStore) closeByProxy(proxyID uint) {
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.active[proxyID]))
+	for token, session := range s.sessions {
+		if session.proxyID == proxyID {
+			delete(s.sessions, token)
+			session.zero()
+		}
+	}
+	for token, cancel := range s.active[proxyID] {
+		delete(s.active[proxyID], token)
+		cancels = append(cancels, cancel)
+	}
+	delete(s.active, proxyID)
+	s.mu.Unlock()
+
+	for _, cancel := range cancels {
+		cancel()
 	}
 }
 
@@ -306,6 +354,9 @@ func (web *web) handleWebDesktopConnectHTTP(w http.ResponseWriter, r *http.Reque
 func (web *web) runWebDesktop(ctx context.Context, wsConn *websocket.Conn, session *webDesktopSession) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	unregister := web.webDesktop.registerActive(session.proxyID, session.token, cancel)
+	defer unregister()
+
 	targetListener, err := web.startWebDesktopTargetBridge(ctx, session.proxyID)
 	if err != nil {
 		log.Debugf("webdesktop target bridge failed: proxy_id=%d err=%v", session.proxyID, err)

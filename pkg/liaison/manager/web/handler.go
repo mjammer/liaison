@@ -247,6 +247,9 @@ func (web *web) UpdateProxy(ctx context.Context, req *v1.UpdateProxyRequest) (*v
 	if err != nil {
 		return nil, mapServiceError(err)
 	}
+	if req.Status == "stopped" {
+		web.closeProxyInteractiveSessions(uint(req.Id))
+	}
 	return resp, nil
 }
 
@@ -260,7 +263,23 @@ func (web *web) DeleteProxy(ctx context.Context, req *v1.DeleteProxyRequest) (*v
 	if err != nil {
 		return nil, mapServiceError(err)
 	}
+	web.closeProxyInteractiveSessions(uint(req.Id))
 	return resp, nil
+}
+
+func (web *web) closeProxyInteractiveSessions(proxyID uint) {
+	if proxyID == 0 {
+		return
+	}
+	if web.webSSH != nil {
+		web.webSSH.closeByProxy(proxyID)
+	}
+	if web.webDesktop != nil {
+		web.webDesktop.closeByProxy(proxyID)
+	}
+	if web.webData != nil {
+		web.webData.closeByProxy(proxyID)
+	}
 }
 
 //-- Traffic Metric --//
