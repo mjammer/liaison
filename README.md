@@ -21,15 +21,15 @@
 |:---:|:---:|
 | ![WebSSH](docs/pages/webssh-terminal.jpg) | ![WebDesktop RDP](docs/pages/webdesktop-rdp.jpg) |
 
-| WebDesktop（随时随地访问 VNC 桌面） | WebData MySQL（随时随地查询关系型数据） |
+| WebDesktop（随时随地访问 VNC 桌面） | WebData MySQL（随时随地访问 MySQL） |
 |:---:|:---:|
 | ![WebDesktop VNC](docs/pages/webdesktop-vnc.jpg) | ![WebData MySQL](docs/pages/webdata-mysql.png) |
 
-| WebData PostgreSQL（随时随地分析业务数据） | WebData MongoDB（随时随地查看文档数据） |
+| WebData PostgreSQL（随时随地访问 PostgreSQL） | WebData MongoDB（随时随地访问 MongoDB） |
 |:---:|:---:|
 | ![WebData PostgreSQL](docs/pages/webdata-postgresql.jpg) | ![WebData MongoDB](docs/pages/webdata-mongodb.png) |
 
-| WebData Redis（随时随地排查缓存数据） |
+| WebData Redis（随时随地访问 Redis） |
 |:---:|
 | ![WebData Redis](docs/pages/webdata-redis.jpg) |
 
