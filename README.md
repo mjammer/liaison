@@ -17,19 +17,23 @@
 |:---:|:---:|
 | ![Jellyfin](docs/pages/jellyfin-ss.png) | ![OpenClaw](docs/pages/openclaw-ss.png) |
 
-## ✨ 当前已实现功能
+| WebSSH（随时随地打开服务器终端） | WebDesktop（随时随地访问 RDP 桌面） |
+|:---:|:---:|
+| ![WebSSH](docs/pages/webssh-terminal.jpg) | ![WebDesktop RDP](docs/pages/webdesktop-rdp.jpg) |
 
-Liaison 不只是发布 HTTP / TCP 入口，也提供了可直接在浏览器中使用的运维工作台：
+| WebDesktop（随时随地访问 VNC 桌面） | WebData MySQL（随时随地查询关系型数据） |
+|:---:|:---:|
+| ![WebDesktop VNC](docs/pages/webdesktop-vnc.jpg) | ![WebData MySQL](docs/pages/webdata-mysql.png) |
 
-| 能力 | 说明 |
-|:---|:---|
-| **WebSSH** | 在浏览器中打开 SSH 终端，展示主机指纹与可用状态，支持保存 / 复用用户密码、刷新、全屏和主动断开连接。 |
-| **WebDesktop** | 通过 guacd 访问 RDP / VNC 远程桌面，支持凭据复用、全屏、刷新和主动断开，适合临时运维、桌面应用和家庭设备访问。 |
-| **WebData** | 内置 MySQL、PostgreSQL、MongoDB、Redis 数据库控制台，支持对象树、查询编辑器、快速筛选、Limit、Explain、对象详情、结果表格以及 CSV / JSON 导出。 |
-| **访问生命周期** | 访问被停用或删除时，会主动关闭已经打开的 WebSSH、WebDesktop、WebData 会话，避免旧页面继续保持连接。 |
-| **安全与审计** | 支持入口随时启停、会话有效状态展示、审计入口、TLS 传输和凭据加密存储。 |
+| WebData PostgreSQL（随时随地分析业务数据） | WebData MongoDB（随时随地查看文档数据） |
+|:---:|:---:|
+| ![WebData PostgreSQL](docs/pages/webdata-postgresql.jpg) | ![WebData MongoDB](docs/pages/webdata-mongodb.png) |
 
-[快速开始](#-快速开始) • [简介](#-项目简介) • [当前能力](#-当前已实现功能) • [贡献](#-贡献)
+| WebData Redis（随时随地排查缓存数据） |
+|:---:|
+| ![WebData Redis](docs/pages/webdata-redis.jpg) |
+
+[快速开始](#-快速开始) • [简介](#-项目简介) • [贡献](#-贡献)
 
 
 ---
@@ -46,7 +50,10 @@ Liaison 是一个生产级应用访问解决方案，不暴露任何内网端口
 - **按入口防火墙**：每条 TCP / HTTP 访问都可配置来源 IP CIDR 白名单，在连接 accept 阶段直接过滤
 - **流量监控**：实时监控设备状态、流量统计，为运维和容量评估提供数据依据
 - **应用代理**：支持 TCP、HTTP/HTTPS、WebSocket 等多种协议的应用代理
+- **WebSSH**：在浏览器中打开 SSH 终端，展示主机指纹与可用状态，支持凭据复用、刷新、全屏和主动断开
 - **WebDesktop**：通过 guacd 在浏览器中访问 RDP / VNC 远程桌面
+- **WebData**：内置 MySQL、PostgreSQL、MongoDB、Redis 数据库控制台，支持对象树、查询编辑器、快速筛选、Explain、结果导出和审计入口
+- **访问生命周期**：访问被停用或删除时，会主动关闭已经打开的 WebSSH、WebDesktop、WebData 会话
 - **API 自动化**：内置个人访问令牌（PAT）用于 CLI / 脚本调用，`/cli-auth` 页面提供浏览器辅助的 CLI 登录流程
 
 适用场景：
