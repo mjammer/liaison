@@ -68,6 +68,7 @@ type webSSHSession struct {
 type webSSHSessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]*webSSHSession
+	active   map[uint]map[string]context.CancelFunc
 }
 
 type webSSHClientMessage struct {
@@ -97,7 +98,10 @@ type webSSHWSWriter struct {
 }
 
 func newWebSSHSessionStore() *webSSHSessionStore {
-	return &webSSHSessionStore{sessions: map[string]*webSSHSession{}}
+	return &webSSHSessionStore{
+		sessions: map[string]*webSSHSession{},
+		active:   map[uint]map[string]context.CancelFunc{},
+	}
 }
 
 func (s *webSSHSessionStore) create(userID, proxyID uint, username string, password []byte, cols, rows int, saveCredential, savedCredential bool) (*webSSHSession, error) {
@@ -145,6 +149,50 @@ func (s *webSSHSessionStore) cleanupLocked(now time.Time) {
 			delete(s.sessions, token)
 			session.zero()
 		}
+	}
+}
+
+func (s *webSSHSessionStore) registerActive(proxyID uint, token string, cancel context.CancelFunc) func() {
+	if cancel == nil {
+		return func() {}
+	}
+	s.mu.Lock()
+	if s.active[proxyID] == nil {
+		s.active[proxyID] = map[string]context.CancelFunc{}
+	}
+	s.active[proxyID][token] = cancel
+	s.mu.Unlock()
+
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if sessions := s.active[proxyID]; sessions != nil {
+			delete(sessions, token)
+			if len(sessions) == 0 {
+				delete(s.active, proxyID)
+			}
+		}
+	}
+}
+
+func (s *webSSHSessionStore) closeByProxy(proxyID uint) {
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.active[proxyID]))
+	for token, session := range s.sessions {
+		if session.proxyID == proxyID {
+			delete(s.sessions, token)
+			session.zero()
+		}
+	}
+	for token, cancel := range s.active[proxyID] {
+		delete(s.active[proxyID], token)
+		cancels = append(cancels, cancel)
+	}
+	delete(s.active, proxyID)
+	s.mu.Unlock()
+
+	for _, cancel := range cancels {
+		cancel()
 	}
 }
 
@@ -376,6 +424,11 @@ func (web *web) handleWebSSHConnectHTTP(w http.ResponseWriter, r *http.Request) 
 }
 
 func (web *web) runWebSSH(ctx context.Context, writer *webSSHWSWriter, wsConn *websocket.Conn, webSession *webSSHSession, clientIP, clientIPSource string) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	unregister := web.webSSH.registerActive(webSession.proxyID, webSession.token, cancel)
+	defer unregister()
+
 	_ = writer.write(webSSHServerMessage{Type: "status", Status: "connecting"})
 	log.Debugf("webssh session starting: proxy_id=%d user_id=%d", webSession.proxyID, webSession.userID)
 	connectStarted := time.Now()

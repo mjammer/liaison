@@ -302,6 +302,22 @@ func (s *webDataSessionStore) delete(token string) {
 	}
 }
 
+func (s *webDataSessionStore) closeByProxy(proxyID uint) {
+	s.mu.Lock()
+	closing := make([]*webDataSession, 0)
+	for token, session := range s.sessions {
+		if session.proxyID == proxyID {
+			delete(s.sessions, token)
+			closing = append(closing, session)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, session := range closing {
+		session.close()
+	}
+}
+
 func (s *webDataSessionStore) cleanupLocked(now time.Time) {
 	for token, session := range s.sessions {
 		if now.After(session.expiresAt) {
@@ -785,6 +801,10 @@ func (web *web) handleWebDataExecuteHTTP(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"code": http.StatusUnauthorized, "message": "invalid or expired webdata session"})
 		return
 	}
+	if err := web.ensureWebDataSessionActive(r.Context(), session); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"code": http.StatusConflict, "message": err.Error()})
+		return
+	}
 	var req webDataExecuteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"code": http.StatusBadRequest, "message": "invalid request body"})
@@ -880,6 +900,10 @@ func (web *web) handleWebDataMetadataHTTP(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"code": http.StatusUnauthorized, "message": "invalid or expired webdata session"})
 		return
 	}
+	if err := web.ensureWebDataSessionActive(r.Context(), session); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"code": http.StatusConflict, "message": err.Error()})
+		return
+	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	ctx, cancel := context.WithTimeout(r.Context(), webDataMetadataTimeout)
@@ -913,6 +937,10 @@ func (web *web) handleWebDataObjectHTTP(w http.ResponseWriter, r *http.Request) 
 	session, ok := web.webData.get(token)
 	if !ok || session.userID != user.ID {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"code": http.StatusUnauthorized, "message": "invalid or expired webdata session"})
+		return
+	}
+	if err := web.ensureWebDataSessionActive(r.Context(), session); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"code": http.StatusConflict, "message": err.Error()})
 		return
 	}
 	q := r.URL.Query()
@@ -1169,6 +1197,20 @@ func (web *web) webDataDialContext(proxyID uint) func(context.Context, string, s
 		conn, _, err := web.controlPlane.OpenWebDataStream(ctx, proxyID)
 		return conn, err
 	}
+}
+
+func (web *web) ensureWebDataSessionActive(ctx context.Context, session *webDataSession) error {
+	if session == nil {
+		return errors.New("invalid webdata session")
+	}
+	target, err := web.controlPlane.GetWebDataTarget(ctx, session.proxyID)
+	if err != nil {
+		return err
+	}
+	if target.EffectiveStatus != "active" {
+		return errors.New(target.EffectiveStatusMessage)
+	}
+	return nil
 }
 
 func (s *webDataSession) execute(ctx context.Context, statement string) (*webDataExecuteResponse, error) {
